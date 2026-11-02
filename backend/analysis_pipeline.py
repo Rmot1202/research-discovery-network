@@ -136,7 +136,8 @@ class FastEmbedder:
         from fastembed import TextEmbedding
 
         self.model = model
-        self._model = TextEmbedding(model_name=model)
+        cache = os.path.expanduser(os.environ.get("FASTEMBED_CACHE_PATH", "~/.cache/fastembed"))
+        self._model = TextEmbedding(model_name=model, cache_dir=cache)
 
     def embed(self, texts: list[str]) -> np.ndarray:
         return _normalize(np.array(list(self._model.embed(texts, batch_size=64)), dtype=np.float32))
@@ -464,7 +465,11 @@ def summarize_papers(
             try:
                 if json.loads(row["analysis"] or "{}").get("summary"):
                     return row, None, "already summarized"  # written by an admin or an earlier run
-                return row, summarizer({"title": row["title"], "abstract": row["abstract"]}), None
+                paper = {"title": row["title"], "abstract": row["abstract"]}
+                try:
+                    return row, summarizer(paper), None
+                except Exception:  # small local models sometimes return broken JSON; ask once more
+                    return row, summarizer(paper), None
             except Exception as error:  # one bad answer must not stop the batch
                 detail = getattr(error, "detail", None) or str(error)
                 return row, None, str(detail)[:300]

@@ -1,11 +1,16 @@
-# Keeps the hosted site up to date with arXiv: imports new Computer Science papers every day
-# and looks up their affiliations on OpenAlex. Writes straight to the hosted database, so the
-# live site shows new papers without a redeploy.
+# Keeps the hosted site up to date with arXiv, every day:
+#   1. imports new Computer Science papers,
+#   2. reads affiliations from the new papers' PDFs (free, no OpenAlex),
+#   3. embeds and groups the new papers into subtopics (free local model),
+#   4. writes plain-language summaries with a free open model (Ollama on the runner).
+# Writes straight to the hosted database, so the live site updates without a redeploy.
 #
-# Setup (once): GitHub repo → Settings → Secrets and variables → Actions → New repository secret
-#   DATABASE_URL      Render database "External Database URL" (required)
-#   OPENALEX_API_KEY  free key from https://openalex.org/settings/api (optional, bigger daily budget)
-#   OPENALEX_EMAIL    contact email for OpenAlex (optional)
+# Setup (once): GitHub repo → Settings → Secrets and variables → Actions
+#   Secret   DATABASE_URL   Render database "External Database URL" (required)
+#   Optional secrets AI_BASE_URL / AI_API_KEY / AI_CHAT_MODEL: use a hosted model instead of Ollama.
+#   Optional variables (Variables tab): SUMMARY_MODEL (default qwen2.5:1.5b),
+#     SUMMARY_MINUTES (default 25), AFFILIATION_DAILY_LIMIT (default 300).
+# Private repos get 2,000 free Actions minutes a month; this job is capped at about 60 min a day.
 name: Update papers
 
 on:
@@ -25,15 +30,15 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: backend/requirements.txt
-      - run: pip install -r backend/requirements.txt
+          cache-dependency-path: backend/requirements*.txt
+      - run: pip install -r backend/requirements-pipeline.txt
       - name: Check the database secret
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -45,8 +50,8 @@ jobs:
       - name: Import new papers and affiliations
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          OPENALEX_API_KEY: ${{ secrets.OPENALEX_API_KEY }}
-          OPENALEX_EMAIL: ${{ secrets.OPENALEX_EMAIL }}
+          AFFILIATION_SOURCES: pdf
+          AFFILIATION_DAILY_LIMIT: ${{ vars.AFFILIATION_DAILY_LIMIT || '300' }}
           SINCE: ${{ github.event.inputs.since }}
         run: |
           if [ -n "$SINCE" ]; then
@@ -54,3 +59,31 @@ jobs:
           else
             python -m backend.update_papers
           fi
+
+      - name: Cache the free models
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/fastembed
+            ~/.ollama/models
+          key: free-models-${{ vars.SUMMARY_MODEL || 'qwen2.5:1.5b' }}-v1
+      - name: Start a free local model (Ollama)
+        env:
+          AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
+          SUMMARY_MODEL: ${{ vars.SUMMARY_MODEL || 'qwen2.5:1.5b' }}
+        run: |
+          if [ -n "$AI_BASE_URL" ]; then echo "Using the hosted model in AI_BASE_URL."; exit 0; fi
+          curl -fsSL https://ollama.com/install.sh | sh
+          sudo systemctl stop ollama 2>/dev/null || true
+          OLLAMA_MODELS="$HOME/.ollama/models" nohup ollama serve > /tmp/ollama.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:11434/api/version && break; sleep 1; done
+          OLLAMA_MODELS="$HOME/.ollama/models" ollama pull "$SUMMARY_MODEL"
+      - name: Embed, group and summarize new papers
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_CHAT_MODEL: ${{ secrets.AI_CHAT_MODEL }}
+          SUMMARY_MODEL: ${{ secrets.AI_CHAT_MODEL || vars.SUMMARY_MODEL || 'qwen2.5:1.5b' }}
+          FASTEMBED_CACHE_PATH: ~/.cache/fastembed
+        run: python -m backend.analysis_pipeline daily --max-minutes "${{ vars.SUMMARY_MINUTES || '25' }}" --workers 2

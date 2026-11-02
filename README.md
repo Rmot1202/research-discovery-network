@@ -105,6 +105,57 @@ For a quick code/test-only run before PostgreSQL is available, omit
 Do not run the PostgreSQL migration until PostgreSQL is available and the
 destination `DATABASE_URL` points to it.
 
+## Free AI analysis and summaries (no OpenAlex, no paid API)
+
+`python -m backend.analysis_pipeline` fills URD components 2, 3 and 5 with free tools:
+
+| Stage | What it does | Tool (free) |
+|---|---|---|
+| `embed` | turns every paper into a vector | fastembed `BAAI/bge-small-en-v1.5` (CPU) |
+| `cluster` | groups each topic's papers into subtopics with readable labels | K-Means + c-TF-IDF |
+| `summarize` | summary, key contribution, why it matters, topics, methods | Ollama `qwen2.5:3b` |
+| affiliations | reads institutions/countries from each paper's PDF | `python -m backend.affiliation_scan` |
+
+Every stage is resumable: press Ctrl+C any time and run the same command again.
+
+### Run it on your Mac (one time setup)
+
+```sh
+cd "~/Desktop/Research Discovery Network Homepage"
+git pull
+.venv/bin/pip install -r backend/requirements-pipeline.txt
+brew install ollama
+ollama serve            # leave this running in its own Terminal tab
+ollama pull qwen2.5:3b  # in another tab, about 2 GB
+```
+
+Point the commands at the hosted database so the live site gets the results
+(Render → database → Connections → External Database URL):
+
+```sh
+export DATABASE_URL='postgresql://...your Render External Database URL...'
+.venv/bin/python -m backend.analysis_pipeline embed       # all papers, roughly 30–60 min
+.venv/bin/python -m backend.analysis_pipeline cluster     # a few minutes
+.venv/bin/python -m backend.analysis_pipeline summarize --max-minutes 480   # overnight, repeat as needed
+.venv/bin/python -m backend.affiliation_scan              # PDF affiliations, about 1 paper / 3 s
+.venv/bin/python -m backend.analysis_pipeline status      # progress
+```
+
+Summaries are the slow part (a few seconds per paper), so the newest and
+editor-approved papers are done first. Use `--model qwen2.5:1.5b` for faster,
+simpler summaries. To use a local copy instead of the hosted database, put
+`env -u DATABASE_URL` in front of each command.
+
+The daily GitHub update (`update-papers.yml`) then keeps up on its own: it embeds
+and groups each day's new papers, reads their PDFs for affiliations, and summarizes
+as many as fit in about 25 minutes with Ollama on the GitHub runner.
+
+### Exploring deeper on the map
+
+Click a topic to travel to it, then click it again (or press **Look inside**) to
+open its subtopics. The small dots around each subtopic are papers; click one for
+its summary and arXiv links. **How to use** in the top bar replays a guided demo.
+
 ## Research assistant (ask the archive)
 
 The **Ask the archive** section answers questions about every imported paper
