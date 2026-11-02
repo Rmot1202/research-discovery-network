@@ -33,10 +33,11 @@ class AffiliationScanTests(unittest.TestCase):
         self.engine = create_database_engine(f"sqlite:///{Path(self.tmp.name) / 'p.sqlite3'}")
         with self.engine.begin() as connection:
             connection.execute(text(
-                "CREATE TABLE papers (arxiv_id TEXT PRIMARY KEY, analysis TEXT NOT NULL, title TEXT, institution TEXT, country TEXT)"
+                "CREATE TABLE papers (arxiv_id TEXT PRIMARY KEY, analysis TEXT NOT NULL, title TEXT, institution TEXT, country TEXT, "
+                "published_at TEXT)"
             ))
             for arxiv_id, institution in [("2601.00001", None), ("2601.00002", None), ("2601.00003", "Admin Entered Lab")]:
-                connection.execute(text("INSERT INTO papers VALUES (:id, '{}', 't', :i, NULL)"), {"id": arxiv_id, "i": institution})
+                connection.execute(text("INSERT INTO papers VALUES (:id, '{}', 't', :i, NULL, '2026-01-05')"), {"id": arxiv_id, "i": institution})
 
     def tearDown(self):
         self.engine.dispose()
@@ -133,23 +134,30 @@ class OldStyleIdTests(unittest.TestCase):
         with engine.begin() as connection:
             connection.execute(text(
                 "CREATE TABLE papers (arxiv_id TEXT PRIMARY KEY, analysis TEXT NOT NULL, title TEXT, institution TEXT, "
-                "country TEXT, primary_category TEXT, raw_metadata TEXT)"
+                "country TEXT, primary_category TEXT, raw_metadata TEXT, published_at TEXT)"
             ))
-            for arxiv_id, categories in [("0002216", ["math.CO", "cs.DM"]), ("2601.00001", ["cs.LG"]), ("2610.00001", ["cs.CV"])]:
+            for arxiv_id, categories, published in [
+                ("0002216", ["math.CO", "cs.DM"], "2000-02-20"),
+                ("9912001", ["cs.AI"], "1999-12-01"),  # 1990s IDs sort above new ones as text
+                ("2601.00001", ["cs.LG"], "2026-01-05"),
+                ("2610.00001", ["cs.CV"], "2026-10-01"),
+            ]:
                 connection.execute(
-                    text("INSERT INTO papers VALUES (:id, '{}', 't', NULL, NULL, :p, :r)"),
-                    {"id": arxiv_id, "p": categories[-1], "r": json.dumps({"categories": categories})},
+                    text("INSERT INTO papers VALUES (:id, '{}', 't', NULL, NULL, :p, :r, :d)"),
+                    {"id": arxiv_id, "p": categories[-1], "r": json.dumps({"categories": categories}), "d": published},
                 )
         # a saved state from the old oldest-first scan
         affiliation_scan._ensure_tables(engine)
-        affiliation_scan.write_state(engine, {**affiliation_scan.default_state(), "order": None, "cursor": "0002216", "checked": 50})
+        with engine.begin() as connection:  # exactly what the old version saved: no "order" key
+            connection.execute(text("INSERT INTO affiliation_scan_state (id, state_json) VALUES (1, :s)"),
+                               {"s": json.dumps({"status": "paused", "cursor": "0002216", "checked": 50})})
         seen = []
         with mock.patch.dict("os.environ", {"AFFILIATION_SOURCES": ""}), \
                 mock.patch.object(affiliation_scan, "pdf_first_page_text", side_effect=lambda path: seen.append(path) or PDF_TEXT), \
                 mock.patch.object(affiliation_scan.time, "sleep"):
             state = affiliation_scan.run_scan(engine)
-        self.assertEqual(seen, ["2610.00001", "2601.00001", "math/0002216"])
-        self.assertEqual(state["checked"], 3)  # restarted cleanly, old cursor dropped
+        self.assertEqual(seen, ["2610.00001", "2601.00001", "math/0002216", "cs/9912001"])
+        self.assertEqual(state["checked"], 4)  # restarted cleanly, old cursor dropped
         self.assertEqual(state["status"], "complete")
 
 

@@ -105,7 +105,9 @@ def read_state(engine: Engine) -> dict[str, Any]:
         row = connection.execute(text("SELECT state_json FROM affiliation_scan_state WHERE id = 1")).first()
     state = default_state()
     if row:
-        state.update(json.loads(row[0]))
+        saved = json.loads(row[0])
+        saved.setdefault("order", None)  # saved by an older version: let run_scan restart it
+        state.update(saved)
     return state
 
 
@@ -318,27 +320,43 @@ def save_affiliations(engine: Engine, arxiv_id: str, affiliations: list[dict[str
 
 # ----------------------------------------------------------------------------- scan loop
 
-SCAN_ORDER = "newest_first"
+SCAN_ORDER = "newest_published_first"
 
 
-def _next_batch(engine: Engine, cursor: str, size: int) -> list[str]:
-    """Newest papers first: new-style IDs (YYMM.NNNNN) sort above old-style ones, and the
-    newest papers are the ones most likely to have readable affiliations."""
-    query = "SELECT arxiv_id FROM papers WHERE institution IS NULL"
+def _split_cursor(cursor: str) -> tuple[str, str] | None:
+    """Cursor is "<published_at>|<arxiv_id>" of the last checked paper ("" = start)."""
+    if not cursor or "|" not in cursor:
+        return None
+    published, arxiv_id = cursor.rsplit("|", 1)
+    return published, arxiv_id
+
+
+_AFTER_CURSOR = (
+    " AND (COALESCE(published_at, '') < :p OR (COALESCE(published_at, '') = :p AND arxiv_id < :c))"
+)
+
+
+def _next_batch(engine: Engine, cursor: str, size: int) -> list[tuple[str, str]]:
+    """Newest published papers first (they are the most likely to have readable affiliations).
+    Returns (arxiv_id, cursor) pairs."""
+    query = "SELECT arxiv_id, COALESCE(published_at, '') FROM papers WHERE institution IS NULL"
     params: dict[str, Any] = {"n": size}
-    if cursor:
-        query += " AND arxiv_id < :c"
-        params["c"] = cursor
+    position = _split_cursor(cursor)
+    if position:
+        query += _AFTER_CURSOR
+        params.update({"p": position[0], "c": position[1]})
+    query += " ORDER BY COALESCE(published_at, '') DESC, arxiv_id DESC LIMIT :n"
     with engine.connect() as connection:
-        return [row[0] for row in connection.execute(text(query + " ORDER BY arxiv_id DESC LIMIT :n"), params).all()]
+        return [(row[0], f"{row[1]}|{row[0]}") for row in connection.execute(text(query), params).all()]
 
 
 def _remaining(engine: Engine, cursor: str) -> int:
     query = "SELECT COUNT(*) FROM papers WHERE institution IS NULL"
     params: dict[str, Any] = {}
-    if cursor:
-        query += " AND arxiv_id < :c"
-        params["c"] = cursor
+    position = _split_cursor(cursor)
+    if position:
+        query += _AFTER_CURSOR
+        params.update({"p": position[0], "c": position[1]})
     with engine.connect() as connection:
         return connection.execute(text(query), params).scalar_one()
 
@@ -394,7 +412,9 @@ def run_scan(
     try:
         while not stop.is_set() and (limit is None or checked_this_run < limit):
             size = OPENALEX_BATCH if limit is None else min(OPENALEX_BATCH, limit - checked_this_run)
-            batch = _next_batch(engine, state["cursor"], size)
+            positions = _next_batch(engine, state["cursor"], size)
+            batch = [arxiv_id for arxiv_id, _ in positions]
+            cursor_for = dict(positions)
             if not batch:
                 state["status"] = "complete"
                 break
@@ -434,7 +454,7 @@ def run_scan(
                     state["found"] += 1
                     state["last_found"] = ([arxiv_id] + state["last_found"])[:8]
                 state["checked"] += 1
-                state["cursor"] = arxiv_id
+                state["cursor"] = cursor_for[arxiv_id]
                 checked_this_run += 1
             write_state(engine, state)
             _invalidate_gap_cache()
@@ -545,7 +565,7 @@ def main() -> None:
 
     def report(state: dict[str, Any]) -> None:
         print(f"checked {state['checked']:,} · found {state['found']:,} "
-              f"(OpenAlex {state['found_openalex']:,}, PDF {state['found_pdf']:,}) · cursor {state['cursor']}"
+              f"(OpenAlex {state['found_openalex']:,}, PDF {state['found_pdf']:,}) · at {state['cursor'].replace('|', ' ')[:10] or 'start'} ({state['cursor'].rsplit('|', 1)[-1]})"
               + (f" · last problem: {state['error'][:120]}" if state.get("error") else ""), flush=True)
 
     try:
