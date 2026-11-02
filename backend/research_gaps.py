@@ -1,5 +1,5 @@
 """Research gap scores: explainable estimates of whether research is under-researched
-(too little work) and underrepresented (visible work comes from few places or groups).
+(too little work) and underrepresented (work in the collection comes from few places or groups).
 
 Every score is computed only from the imported arXiv metadata (dates, categories,
 titles, and author name strings used as opaque labels). Each component is on a
@@ -87,6 +87,9 @@ def invalidate_cache() -> None:
     """Called after affiliation updates so the next report re-reads the archive."""
     with _cache_lock:
         _cache["count"] = -1
+    from backend import discovery_score
+
+    discovery_score.invalidate()
 
 
 def _load_corpus(engine: Engine) -> dict[str, Any]:

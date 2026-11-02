@@ -134,7 +134,7 @@ export default function ResearchGaps({ report, error, topics, onSelectTopic }: R
         <div>
           <span className="eyebrow">Research gap finder</span>
           <h2>Is this research under-researched or underrepresented?</h2>
-          <p>Two separate, explainable scores from the archive's metadata. Under-researched asks how little work exists. Underrepresented asks whether the visible work comes from only a few institutions or countries.</p>
+          <p>Two separate, explainable scores from the archive's metadata. Under-researched asks how little work exists. Underrepresented asks whether the work in this arXiv collection comes from only a few institutions or countries. Both measure representation in the dataset, not visibility (citations or downloads are not used).</p>
         </div>
       </div>
 

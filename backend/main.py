@@ -27,7 +27,8 @@ from backend.paper_queries import (
 from backend.paper_chat import (
     ai_chat_configured, answer_question, collection_stats, ensure_search_index, retrieve_papers,
 )
-from backend import affiliation_scan, analysis_pipeline, subtopics
+from backend import affiliation_scan, analysis_pipeline, discovery_score, subtopics
+from backend.discovery_score import DiscoveryIndex
 from backend.research_gaps import gap_summary_for_chat, idea_gap_report, invalidate_cache, topic_gap_report
 from backend.schemas import ChatRequest, DocumentedAffiliation, ReviewUpdate
 from backend.security import require_admin
@@ -305,12 +306,6 @@ def insert_papers(papers: list[dict[str, Any]]) -> int:
             analysis = {
                 "topic": CATEGORY_LABELS.get(category, category),
                 "cluster_id": None,
-                "representation_score": 0,
-                "score_components": {
-                    "topic_rarity": None,
-                    "institution_visibility": None,
-                    "geographic_visibility": None,
-                },
                 "summary": None,
                 "approval_status": "pending",
             }
@@ -390,11 +385,23 @@ def read_paper_rows(
     limit: int,
     offset: int,
     approval_status: str | None = None,
-) -> tuple[list[Any], int, dict[str, int], dict[str, int], dict[str, int]]:
-    return query_paper_rows(
+    weights: dict[str, float] | None = None,
+) -> tuple[list[Any], DiscoveryIndex, int]:
+    index = discovery_score.load_index(ENGINE)
+    rows, total = query_paper_rows(
         connect_db, query=query, category=category, country=country, institution=institution,
         year=year, sort=sort, limit=limit, offset=offset, approval_status=approval_status,
+        index=index, weights=weights,
     )
+    return rows, index, total
+
+
+def read_weights(weights: str | None) -> dict[str, float]:
+    try:
+        # direct Python calls (tests) pass the Query default object instead of a string
+        return discovery_score.parse_weights(weights if isinstance(weights, str) and weights else None)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
 
 def get_filter_options() -> dict[str, Any]:
@@ -564,8 +571,10 @@ def list_papers(
     institution: str | None = None,
     year: int | None = Query(default=None, ge=1991, le=2100),
     sort: str = "newest",
+    weights: str | None = Query(default=None, max_length=120),
 ) -> dict[str, Any]:
-    rows, total, category_counts, institution_counts, country_counts = read_paper_rows(
+    weight_map = read_weights(weights)
+    rows, index, total = read_paper_rows(
         query=q,
         category=category,
         country=country,
@@ -574,6 +583,7 @@ def list_papers(
         sort=sort,
         limit=limit,
         offset=offset,
+        weights=weight_map,
     )
     with connect_db() as connection:
         all_count = connection.execute("SELECT COUNT(*) FROM papers").fetchone()[0]
@@ -583,7 +593,7 @@ def list_papers(
         "limit": limit,
         "offset": offset,
         "papers": [
-            serialize_paper(row, category_counts, institution_counts, country_counts, all_count)
+            serialize_paper(row, index, weight_map)
             for row in rows
         ],
     }
@@ -599,8 +609,10 @@ def list_featured_papers(
     institution: str | None = None,
     year: int | None = Query(default=None, ge=1991, le=2100),
     sort: str = "newest",
+    weights: str | None = Query(default=None, max_length=120),
 ) -> dict[str, Any]:
-    rows, total, category_counts, institution_counts, country_counts = read_paper_rows(
+    weight_map = read_weights(weights)
+    rows, index, total = read_paper_rows(
         query=q,
         category=category,
         country=country,
@@ -610,6 +622,7 @@ def list_featured_papers(
         limit=limit,
         offset=offset,
         approval_status=public_approval_filter(),
+        weights=weight_map,
     )
     with connect_db() as connection:
         all_count = connection.execute("SELECT COUNT(*) FROM papers").fetchone()[0]
@@ -619,10 +632,68 @@ def list_featured_papers(
         "limit": limit,
         "offset": offset,
         "papers": [
-            serialize_paper(row, category_counts, institution_counts, country_counts, all_count)
+            serialize_paper(row, index, weight_map)
             for row in rows
         ],
     }
+
+
+@app.get("/api/discovery")
+def discovery_ranking(
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    category: str | None = None,
+    factor: str | None = Query(default=None, pattern="^(topic|institution|geography)$"),
+    weights: str | None = Query(default=None, max_length=120),
+    min_factors: int = Query(default=1, ge=1, le=3),
+) -> dict[str, Any]:
+    """Papers ranked by Discovery Score. factor=... keeps only papers flagged on that factor;
+    min_factors=2 or 3 keeps only papers with that many measurable factors."""
+    weight_map = read_weights(weights)
+    if category and category not in CATEGORY_CODES:
+        raise HTTPException(status_code=422, detail="Unknown computer science category.")
+    index = discovery_score.load_index(ENGINE)
+    ids = [arxiv_id for arxiv_id, known in index.papers.items() if not category or known[0] == category]
+    with connect_db() as connection:
+        hidden = {
+            row[0] for row in connection.execute("SELECT arxiv_id FROM papers WHERE approval_status = 'rejected'")
+        }
+    ranked = [
+        (arxiv_id, result)
+        for arxiv_id, result in discovery_score.ranked_ids(index, ids, weight_map)
+        if arxiv_id not in hidden
+        and (not factor or factor in result["flags"])
+        and sum(value is not None for value in result["factors"].values()) >= min_factors
+    ]
+    page = [arxiv_id for arxiv_id, _ in ranked[offset : offset + limit]]
+    rows: dict[str, Any] = {}
+    if page:
+        with connect_db() as connection:
+            rows = {
+                row["arxiv_id"]: row
+                for row in connection.execute(
+                    f"SELECT * FROM papers WHERE arxiv_id IN ({','.join('?' for _ in page)})", page
+                ).fetchall()
+            }
+    return {
+        "total": len(ranked),
+        "limit": limit,
+        "offset": offset,
+        "weights": weight_map,
+        "thresholds": {"factor": discovery_score.FACTOR_THRESHOLD, "overall": discovery_score.OVERALL_THRESHOLD},
+        "measures": discovery_score.MEASURES,
+        "papers": [serialize_paper(rows[arxiv_id], index, weight_map) for arxiv_id in page if arxiv_id in rows],
+    }
+
+
+@app.get("/api/discovery/fields/{code}")
+def discovery_field(code: str, top: int = Query(default=8, ge=1, le=50)) -> dict[str, Any]:
+    """The least represented subtopics, institutions and countries inside one field."""
+    if code not in CATEGORY_CODES:
+        raise HTTPException(status_code=404, detail="Unknown computer science category.")
+    report = discovery_score.field_report(discovery_score.load_index(ENGINE), code, top)
+    report["label"] = CATEGORY_LABELS.get(code, code)
+    return report
 
 
 @app.get("/api/gaps/topics")
@@ -732,9 +803,11 @@ def admin_review_queue(
     limit: int = Query(default=30, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     authorization: str | None = Header(default=None),
+    weights: str | None = Query(default=None, max_length=120),
 ) -> dict[str, Any]:
     require_admin(authorization)
-    rows, total, category_counts, institution_counts, country_counts = read_paper_rows(
+    weight_map = read_weights(weights)
+    rows, index, total = read_paper_rows(
         query="",
         category=None,
         country=None,
@@ -744,14 +817,14 @@ def admin_review_queue(
         limit=limit,
         offset=offset,
         approval_status="pending",
+        weights=weight_map,
     )
     with connect_db() as connection:
         all_count = connection.execute("SELECT COUNT(*) FROM papers").fetchone()[0]
     papers = [
-        serialize_paper(row, category_counts, institution_counts, country_counts, all_count)
+        serialize_paper(row, index, weight_map)
         for row in rows
     ]
-    papers.sort(key=lambda paper: paper["representation_score"], reverse=True)
     return {
         "total": total,
         "limit": limit,

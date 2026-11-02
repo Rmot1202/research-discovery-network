@@ -420,7 +420,10 @@ class ReviewWorkflowTests(unittest.TestCase):
         enriched = next(paper for paper in result["papers"] if paper["arxiv_id"] == "2601.00001")
         self.assertEqual(enriched["institution"], "Example University")
         self.assertEqual(enriched["country"], "Example Country")
-        self.assertIsNotNone(enriched["score_components"]["institution_visibility"])
+        discovery = enriched["discovery"]
+        self.assertEqual(set(discovery["factors"]), {"topic", "institution", "geography"})
+        self.assertEqual(discovery["weights"], {"topic": 0.4, "institution": 0.3, "geography": 0.3})
+        self.assertEqual(discovery["measures"], "representation")
         self.assertEqual(main.get_filter_options()["countries"], ["Example Country"])
 
 

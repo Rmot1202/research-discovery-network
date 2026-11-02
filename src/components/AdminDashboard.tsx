@@ -9,6 +9,7 @@ import type {
 } from '../types'
 import AffiliationScanPanel from './AffiliationScanPanel'
 import { ArrowIcon } from './Icons'
+import { DiscoveryBreakdown } from './DiscoveryScore'
 
 type AdminDashboardProps = {
   isOpen: boolean
@@ -105,16 +106,11 @@ export default function AdminDashboard(props: AdminDashboardProps) {
                 <article className="admin-paper" key={paper.arxiv_id}>
                   <div className="admin-paper-heading">
                     <div><span>{paper.topic} · {paper.arxiv_id}</span><h3>{paper.title}</h3><p>{paper.authors.join(' · ')} · {paper.published_at.slice(0, 4)}</p></div>
-                    <strong>{paper.representation_score.toFixed(1)}<small> representation score</small></strong>
+                    <strong>{paper.discovery_score === null ? '—' : paper.discovery_score.toFixed(1)}<small> Discovery Score</small></strong>
                   </div>
                   <p className="admin-abstract">{paper.abstract}</p>
-                  <div className="score-breakdown">
-                    <span>Topic rarity <b>{paper.score_components.topic_rarity ?? '—'}</b></span>
-                    <span>Institution visibility <b>{paper.score_components.institution_visibility ?? 'Unavailable'}</b></span>
-                    <span>Geographic visibility <b>{paper.score_components.geographic_visibility ?? 'Unavailable'}</b></span>
-                    {paper.topic_cluster && <span>Embedding cluster <b>{paper.topic_cluster}</b></span>}
-                  </div>
-                  <p className="score-explanation">Visibility score weights: topic 60%, institution 25%, geography 15%; unavailable components are omitted and the remaining weights are normalized. This is not a quality score.</p>
+                  <DiscoveryBreakdown discovery={paper.discovery} field={paper.primary_category} />
+                  <p className="score-explanation">Weights: topic 40%, institution 30%, country 30%. Factors without documented data are left out and the rest are rescaled. This is a representation score, not a quality or visibility score.</p>
                   {(paper.topics || paper.methods || paper.context) && (
                     <div className="ai-tags">
                       {paper.topics && <span>Research topics: {paper.topics}</span>}

@@ -10,7 +10,8 @@ export type Paper = {
   topic: string
   institution: string | null
   country: string | null
-  representation_score: number
+  discovery_score: number | null
+  discovery?: Discovery
   summary?: string | null
   key_contribution?: string | null
   application?: string | null
@@ -26,13 +27,19 @@ export type Paper = {
   institutions_all?: string[] | null
   countries_all?: string[] | null
   has_school_affiliation?: boolean | null
-  score_components: {
-    topic_rarity: number | null
-    institution_visibility: number | null
-    geographic_visibility: number | null
-    weights?: { topic: number; institution: number; geography: number }
-  }
   approval_status: string
+}
+
+export type Discovery = {
+  discovery_score: number | null
+  factors: { topic: number | null; institution: number | null; geography: number | null }
+  topic_basis: 'subtopic' | 'category' | null
+  weights: { topic: number; institution: number; geography: number }
+  coverage: number
+  flags: ('topic' | 'institution' | 'geography')[]
+  reasons: string[]
+  underrepresented: boolean
+  measures: 'representation'
 }
 
 export type Topic = { code: string; label: string; count: number }

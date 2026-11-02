@@ -8,6 +8,7 @@ import ResearchGaps from './components/ResearchGaps'
 import TopicNetwork from './components/TopicNetwork'
 import GuideTour, { shouldAutoOpenGuide } from './components/GuideTour'
 import { findRelatedPapers } from './paperDiscovery'
+import { DiscoveryBreakdown, DiscoveryPill } from './components/DiscoveryScore'
 import type { MapCommand } from './types'
 import type {
   AdminOverview,
@@ -640,7 +641,7 @@ export default function App() {
             <select value={sort} onChange={(event) => { setSort(event.target.value); setPage(0) }}>
               <option value="newest">Newest</option>
               <option value="oldest">Oldest</option>
-              <option value="score">Topic rarity</option>
+              <option value="score">Discovery Score</option>
               <option value="title">Title A–Z</option>
             </select>
           </label>
@@ -671,7 +672,7 @@ export default function App() {
                     )}
                   </span>
                   <span>{paper.country ?? 'Country unavailable'}</span>
-                  <span>Topic rarity {paper.score_components.topic_rarity ?? '—'}</span>
+                  <DiscoveryPill discovery={paper.discovery} />
                   <span>{paper.approval_status === 'approved' ? 'Featured' : paper.approval_status === 'rejected' ? 'Rejected' : 'Pending review'}</span>
                 </div>
                 {selectedPaper?.arxiv_id === paper.arxiv_id && (
@@ -681,6 +682,7 @@ export default function App() {
                       <a href={paper.url} target="_blank" rel="noreferrer">Read full paper on arXiv <ArrowIcon /></a>
                     </div>
                     <p className="reader-abstract">{paper.abstract || 'No abstract is available in the imported metadata.'}</p>
+                    <DiscoveryBreakdown discovery={paper.discovery} field={paper.primary_category} />
                     <div className="related-heading">
                       <div><span className="eyebrow">Explore connections</span><h3>Related papers &amp; potential collaboration leads</h3></div>
                       <p>Match score: 55% topic overlap + 45% title/abstract term overlap. These signals can suggest a lead to explore, not researcher intent or paper quality; documented affiliations are unavailable in this archive.</p>

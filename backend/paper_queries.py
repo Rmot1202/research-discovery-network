@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from backend.discovery_score import DiscoveryIndex, ranked_ids, score_paper
 from backend.taxonomy import CATEGORIES, CATEGORY_CODES, CATEGORY_LABELS
 
 
@@ -21,7 +22,9 @@ def read_paper_rows(
     limit: int,
     offset: int,
     approval_status: str | None = None,
-) -> tuple[list[Any], int, dict[str, int], dict[str, int], dict[str, int]]:
+    index: DiscoveryIndex | None = None,
+    weights: dict[str, float] | None = None,
+) -> tuple[list[Any], int]:
     clauses: list[str] = []
     values: list[Any] = []
     if category:
@@ -76,84 +79,54 @@ def read_paper_rows(
         "title": "LOWER(title) ASC",
         # PUBLISH_MODE=auto featured list: editor-approved papers first, then the newest.
         "featured": "CASE WHEN approval_status = 'approved' THEN 0 ELSE 1 END, published_at DESC, arxiv_id DESC",
-        "score": "(SELECT COUNT(*) FROM paper_categories AS topic_count "
-        "WHERE topic_count.category = papers.primary_category) ASC, "
-        "published_at DESC",
+        "score": "published_at DESC, arxiv_id DESC",  # re-ranked by Discovery Score below
     }.get(sort)
     if ordering is None:
         raise HTTPException(status_code=422, detail="sort must be newest, oldest, title, or score.")
 
     with connect_db() as connection:
         total = connection.execute(f"SELECT COUNT(*) FROM papers{where}", values).fetchone()[0]
+        if sort == "score" and index is not None:
+            matching = [
+                row[0]
+                for row in connection.execute(f"SELECT arxiv_id FROM papers{where}", values).fetchall()
+            ]
+            page = [arxiv_id for arxiv_id, _ in ranked_ids(index, matching, weights)[offset : offset + limit]]
+            if not page:
+                return [], total
+            by_id = {
+                row["arxiv_id"]: row
+                for row in connection.execute(
+                    f"SELECT * FROM papers WHERE arxiv_id IN ({','.join('?' for _ in page)})", page
+                ).fetchall()
+            }
+            return [by_id[arxiv_id] for arxiv_id in page if arxiv_id in by_id], total
         rows = connection.execute(
             f"SELECT * FROM papers{where} ORDER BY {ordering} LIMIT ? OFFSET ?",
             [*values, limit, offset],
         ).fetchall()
-        category_counts = {
-            row["category"]: row["count"]
-            for row in connection.execute(
-                "SELECT category, COUNT(*) AS count FROM paper_categories GROUP BY category"
-            ).fetchall()
-        }
-        institution_counts = {
-            row["normalized"]: row["count"]
-            for row in connection.execute(
-                "SELECT LOWER(TRIM(institution)) AS normalized, COUNT(*) AS count FROM papers "
-                "WHERE institution IS NOT NULL GROUP BY LOWER(TRIM(institution))"
-            ).fetchall()
-        }
-        country_counts = {
-            row["normalized"]: row["count"]
-            for row in connection.execute(
-                "SELECT LOWER(TRIM(country)) AS normalized, COUNT(*) AS count FROM papers "
-                "WHERE country IS NOT NULL GROUP BY LOWER(TRIM(country))"
-            ).fetchall()
-        }
-    return rows, total, category_counts, institution_counts, country_counts
+    return rows, total
 
 
 def serialize_paper(
     row: Any,
-    category_counts: dict[str, int],
-    institution_counts: dict[str, int],
-    country_counts: dict[str, int],
-    total: int,
+    index: DiscoveryIndex,
+    weights: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     raw = json.loads(row["raw_metadata"])
     analysis = json.loads(row["analysis"])
-    category_count = category_counts.get(row["primary_category"], 0)
-    total_category_assignments = sum(category_counts.values())
-    rarity = (
-        round(100 * (1 - category_count / total_category_assignments), 1)
-        if total_category_assignments
-        else None
+    for old_key in ("representation_score", "score_components"):
+        analysis.pop(old_key, None)
+    discovery = score_paper(
+        index,
+        arxiv_id=row["arxiv_id"],
+        field=row["primary_category"],
+        institution=row["institution"],
+        country=row["country"],
+        weights=weights,
     )
-    institution_visibility = (
-        round(100 * (1 - institution_counts[row["institution"].strip().lower()] / total), 1)
-        if row["institution"] and total
-        else None
-    )
-    geographic_visibility = (
-        round(100 * (1 - country_counts[row["country"].strip().lower()] / total), 1)
-        if row["country"] and total
-        else None
-    )
-    available_scores = [(rarity, 0.6)]
-    if institution_visibility is not None:
-        available_scores.append((institution_visibility, 0.25))
-    if geographic_visibility is not None:
-        available_scores.append((geographic_visibility, 0.15))
-    total_weight = sum(weight for _score, weight in available_scores)
-    analysis["representation_score"] = round(
-        sum(score * weight for score, weight in available_scores if score is not None) / total_weight,
-        1,
-    )
-    analysis["score_components"] = {
-        "topic_rarity": rarity,
-        "institution_visibility": institution_visibility,
-        "geographic_visibility": geographic_visibility,
-        "weights": {"topic": 0.6, "institution": 0.25, "geography": 0.15},
-    }
+    analysis["discovery_score"] = discovery["discovery_score"]
+    analysis["discovery"] = discovery
     analysis["approval_status"] = row["approval_status"]
     return {
         **raw,
