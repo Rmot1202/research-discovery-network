@@ -80,6 +80,7 @@ def generate_research_analysis(paper: dict[str, Any]) -> dict[str, str]:
         {
             "model": model,
             "temperature": 0.2,
+            "max_tokens": 600,
             "response_format": {"type": "json_object"},
             "messages": [
                 {"role": "system", "content": prompt},
@@ -91,14 +92,39 @@ def generate_research_analysis(paper: dict[str, Any]) -> dict[str, str]:
         },
     )
     try:
-        content = result["choices"][0]["message"]["content"]
-        analysis = json.loads(content)
-        expected_fields = ("summary", "key_contribution", "application", "relevance", "topics", "methods", "context")
-        if not isinstance(analysis, dict) or any(not isinstance(analysis.get(field), str) for field in expected_fields):
-            raise ValueError("The response is missing required summary fields.")
-        return {field: analysis[field][:1200] for field in expected_fields}
+        return coerce_research_analysis(result["choices"][0]["message"]["content"])
     except (KeyError, IndexError, TypeError, json.JSONDecodeError, ValueError) as error:
         raise HTTPException(status_code=502, detail="AI provider returned an invalid research summary.") from error
+
+
+ANALYSIS_FIELDS = ("summary", "key_contribution", "application", "relevance", "topics", "methods", "context")
+NOT_STATED = "Not stated in the abstract"
+
+
+def coerce_research_analysis(content: str) -> dict[str, str]:
+    """Parse a model's JSON answer leniently. Small local models often wrap JSON in code
+    fences, return lists instead of comma-separated strings, or skip an empty field."""
+    text_value = content.strip()
+    fenced = re.search(r"\{.*\}", text_value, re.DOTALL)
+    if fenced:
+        text_value = fenced.group(0)
+    analysis = json.loads(text_value)
+    if not isinstance(analysis, dict):
+        raise ValueError("The response is not a JSON object.")
+    lowered = {str(key).strip().lower().replace(" ", "_"): value for key, value in analysis.items()}
+    cleaned: dict[str, str] = {}
+    for field in ANALYSIS_FIELDS:
+        value = lowered.get(field)
+        if isinstance(value, list):
+            value = ", ".join(str(item).strip() for item in value if str(item).strip())
+        elif isinstance(value, dict):
+            value = ", ".join(str(item).strip() for item in value.values() if str(item).strip())
+        elif value is not None and not isinstance(value, str):
+            value = str(value)
+        cleaned[field] = (value or "").strip()[:1200] or NOT_STATED
+    if cleaned["summary"] == NOT_STATED:
+        raise ValueError("The response has no summary.")
+    return cleaned
 
 
 def extract_pdf_affiliations(arxiv_id: str, title: str) -> dict[str, Any]:

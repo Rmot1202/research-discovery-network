@@ -1,5 +1,8 @@
 """Daily update: import papers arXiv added since the last run, then look up their affiliations.
 
+Affiliations come from the papers' own PDFs by default (free, no account). Set
+AFFILIATION_SOURCES=openalex+pdf to also use OpenAlex.
+
 Run by the scheduled GitHub Actions workflow (.github/workflows/update-papers.yml) against the
 hosted database, or by hand:
 
@@ -14,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from datetime import UTC, date, datetime, timedelta
@@ -66,6 +70,25 @@ def import_since(from_date: str, max_pages: int | None = None) -> dict[str, int]
     return {"pages": pages, "records": records, "new_papers": inserted}
 
 
+def enrich_recent_pdf(days: int = 14, max_papers: int | None = None) -> dict[str, int]:
+    """Read the PDFs of recent papers that have no affiliation yet (newest first, capped per run)."""
+    max_papers = max_papers if max_papers is not None else int(os.environ.get("AFFILIATION_DAILY_LIMIT", "300"))
+    since = (date.today() - timedelta(days=days)).isoformat()
+    with app_main.ENGINE.connect() as connection:
+        ids = [row[0] for row in connection.execute(
+            text("SELECT p.arxiv_id FROM papers p WHERE p.institution IS NULL AND p.published_at >= :s "
+                 "ORDER BY p.published_at DESC LIMIT :n"),
+            {"s": since, "n": max_papers * 3},
+        ).all()]
+    with app_main.ENGINE.begin() as connection:
+        connection.execute(text(
+            "CREATE TABLE IF NOT EXISTS affiliation_pdf_checked (arxiv_id TEXT PRIMARY KEY, checked_at TEXT NOT NULL)"
+        ))
+        checked = {row[0] for row in connection.execute(text("SELECT arxiv_id FROM affiliation_pdf_checked")).all()}
+    todo = [arxiv_id for arxiv_id in ids if arxiv_id not in checked][:max_papers]
+    return affiliation_scan.scan_pdfs_for(app_main.ENGINE, todo, log=lambda m: print(m, file=sys.stderr, flush=True))
+
+
 def enrich_recent(days: int = 60, max_papers: int = 5000) -> dict[str, int]:
     """OpenAlex affiliations for recent papers that still have none.
 
@@ -103,7 +126,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--since", help="Import papers added on/after this date (YYYY-MM-DD).")
     parser.add_argument("--max-pages", type=int, default=None, help="Stop after this many arXiv pages.")
-    parser.add_argument("--no-affiliations", action="store_true", help="Skip the OpenAlex affiliation lookup.")
+    parser.add_argument("--no-affiliations", action="store_true", help="Skip the affiliation lookup.")
     args = parser.parse_args()
 
     state = read_update_state()
@@ -117,8 +140,12 @@ def main() -> None:
     print(f"Importing arXiv CS papers added since {from_date}...", file=sys.stderr, flush=True)
     result: dict[str, Any] = {"from_date": from_date, **import_since(from_date, args.max_pages)}
     if not args.no_affiliations:
+        use_openalex, use_pdf = affiliation_scan.configured_sources()
         print("Looking up affiliations for recent papers...", file=sys.stderr, flush=True)
-        result.update(enrich_recent())
+        if use_openalex:
+            result.update(enrich_recent())
+        if use_pdf:
+            result.update(enrich_recent_pdf())
     with connect_db() as connection:
         result["total_papers"] = connection.execute("SELECT COUNT(*) FROM papers").fetchone()[0]
     state.update({"last_run_date": started.date().isoformat(), "last_run_at": started.isoformat(timespec="seconds"),

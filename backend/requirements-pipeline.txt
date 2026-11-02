@@ -1,0 +1,5 @@
+# Extra packages for the analysis pipeline (python -m backend.analysis_pipeline).
+# Not installed in the web image, so the hosted site stays small.
+-r requirements.txt
+fastembed>=0.4,<1
+numpy>=1.26

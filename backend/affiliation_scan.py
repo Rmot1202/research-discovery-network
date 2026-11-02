@@ -17,10 +17,14 @@ its source URL, the verbatim affiliation text, and the method that found it, and
 marked as not yet reviewed. Existing institution/country values (for example, ones an
 admin entered) are never overwritten.
 
+Which sources are used is set by AFFILIATION_SOURCES (or --sources):
+  "pdf" (default): only the paper's own PDF. Free, no account or key, about 1 paper / 3 s.
+  "openalex+pdf": OpenAlex first, PDF for misses.   "openalex": OpenAlex only.
+
 Run it from the admin dashboard, the API, or the command line:
 
-    python -m backend.affiliation_scan --limit 2000          # OpenAlex only
-    python -m backend.affiliation_scan --pdf --limit 200     # also read PDFs for misses
+    python -m backend.affiliation_scan --limit 2000          # PDF only (default)
+    python -m backend.affiliation_scan --sources openalex+pdf
     python -m backend.affiliation_scan --status
 """
 from __future__ import annotations
@@ -62,6 +66,14 @@ PROSE = re.compile(r"\b(we|our|us|this paper|this work|propose[sd]?|study|studie
 EMAIL_OR_URL = re.compile(r"\S+@\S+|https?://\S+|www\.\S+")
 COUNTRY_ALIASES = {"USA": "United States", "U.S.A.": "United States", "UK": "United Kingdom", "P.R. China": "China",
                    "PR China": "China", "Korea": "South Korea", "Republic of Korea": "South Korea"}
+
+def configured_sources() -> tuple[bool, bool]:
+    """(use_openalex, use_pdf) from AFFILIATION_SOURCES; default is PDF only, no OpenAlex."""
+    value = os.environ.get("AFFILIATION_SOURCES", "pdf").strip().lower()
+    use_openalex = "openalex" in value
+    use_pdf = "pdf" in value or not use_openalex
+    return use_openalex, use_pdf
+
 
 _lock = threading.Lock()
 _stop = threading.Event()
@@ -317,8 +329,14 @@ def run_scan(
     pdf_fallback: bool = False,
     on_batch: Callable[[dict[str, Any]], None] | None = None,
     stop: threading.Event | None = None,
+    use_openalex: bool | None = None,
 ) -> dict[str, Any]:
     stop = stop or threading.Event()
+    if use_openalex is None:
+        use_openalex, configured_pdf = configured_sources()
+        pdf_fallback = pdf_fallback or configured_pdf
+    if not use_openalex:
+        pdf_fallback = True  # the PDF is the only source left
     state = read_state(engine)
     if state["status"] == "complete":
         state.update(default_state())  # start a fresh pass; already-documented papers are skipped anyway
@@ -334,7 +352,7 @@ def run_scan(
                 state["status"] = "complete"
                 break
             try:
-                works = {} if state.get("openalex_exhausted") else fetch_openalex(batch)
+                works = {} if (state.get("openalex_exhausted") or not use_openalex) else fetch_openalex(batch)
             except OpenAlexBudgetExhausted as error:
                 if not pdf_fallback:
                     state["status"] = "paused"
@@ -388,6 +406,39 @@ def run_scan(
     return state
 
 
+def scan_pdfs_for(engine: Engine, arxiv_ids: list[str], log: Callable[[str], None] | None = None) -> dict[str, int]:
+    """PDF-only affiliation lookup for specific papers (used by the daily update). Each paper's
+    PDF is read once; papers already checked are skipped on later runs."""
+    with engine.begin() as connection:
+        connection.execute(text(
+            "CREATE TABLE IF NOT EXISTS affiliation_pdf_checked (arxiv_id TEXT PRIMARY KEY, checked_at TEXT NOT NULL)"
+        ))
+        done = {row[0] for row in connection.execute(text("SELECT arxiv_id FROM affiliation_pdf_checked")).all()}
+    checked = found = 0
+    for arxiv_id in arxiv_ids:
+        if arxiv_id in done:
+            continue
+        try:
+            page = pdf_first_page_text(arxiv_id)
+            if save_affiliations(engine, arxiv_id, affiliations_from_text(page), "pdf_text",
+                                 f"https://arxiv.org/pdf/{arxiv_id}"):
+                found += 1
+        except Exception as error:  # one bad PDF must not stop the run
+            if log:
+                log(f"  {arxiv_id}: {error}")
+        with engine.begin() as connection:
+            connection.execute(
+                text("INSERT INTO affiliation_pdf_checked (arxiv_id, checked_at) VALUES (:id, :t) ON CONFLICT DO NOTHING"),
+                {"id": arxiv_id, "t": datetime.now(timezone.utc).isoformat(timespec="seconds")},
+            )
+        checked += 1
+        if log and checked % 25 == 0:
+            log(f"  PDFs read {checked:,}, affiliations found {found:,}")
+        time.sleep(PDF_INTERVAL_SECONDS)
+    _invalidate_gap_cache()
+    return {"pdf_checked": checked, "pdf_found": found}
+
+
 def _invalidate_gap_cache() -> None:
     try:
         from . import research_gaps
@@ -430,9 +481,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Scan papers for documented institution/school/country affiliations.")
     parser.add_argument("--limit", type=int, default=None, help="Stop after checking this many papers (default: all).")
     parser.add_argument("--pdf", action="store_true", help="Also read page 1 of the PDF when OpenAlex has nothing (slow).")
+    parser.add_argument("--sources", default=None, help='"pdf" (default), "openalex+pdf", or "openalex".')
     parser.add_argument("--status", action="store_true", help="Print scan progress and exit.")
     parser.add_argument("--restart", action="store_true", help="Start again from the first paper.")
     args = parser.parse_args()
+    if args.sources:
+        os.environ["AFFILIATION_SOURCES"] = args.sources
     engine = create_database_engine()
     _ensure_tables(engine)
     if args.status:

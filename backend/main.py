@@ -27,7 +27,7 @@ from backend.paper_queries import (
 from backend.paper_chat import (
     ai_chat_configured, answer_question, collection_stats, ensure_search_index, retrieve_papers,
 )
-from backend import affiliation_scan
+from backend import affiliation_scan, analysis_pipeline, subtopics
 from backend.research_gaps import gap_summary_for_chat, idea_gap_report, invalidate_cache, topic_gap_report
 from backend.schemas import ChatRequest, DocumentedAffiliation, ReviewUpdate
 from backend.security import require_admin
@@ -123,6 +123,7 @@ def init_db() -> None:
             )
             """
         )
+    analysis_pipeline.ensure_tables(ENGINE)
     migrate_legacy_json()
 
 
@@ -455,6 +456,19 @@ def startup() -> None:
 
     threading.Thread(target=build_index, daemon=True).start()
     affiliation_scan.mark_interrupted(ENGINE)
+    analysis_pipeline.ensure_tables(ENGINE)
+
+
+@app.get("/api/topics/{code}/subtopics")
+def topic_subtopics(code: str, papers: int = Query(default=8, ge=1, le=24)) -> dict[str, Any]:
+    """The deeper map level: subtopics inside one category, each with its closest papers."""
+    return subtopics.topic_drilldown(connect_db, code, papers, public_approval_filter())
+
+
+@app.get("/api/analysis/status")
+def analysis_status() -> dict[str, Any]:
+    """How far the automatic embedding, grouping and summarization have got."""
+    return analysis_pipeline.status(ENGINE)
 
 
 @app.get("/api/health")
@@ -696,18 +710,13 @@ def admin_overview(authorization: str | None = Header(default=None)) -> dict[str
             FROM papers
             """
         ).fetchone()
-        analyzed = sum(
-            1
-            for row in connection.execute("SELECT analysis FROM papers")
-            if json.loads(row["analysis"]).get("embedding")
-        )
+        analyzed = connection.execute("SELECT COUNT(*) FROM paper_embeddings").fetchone()[0]
     return {
         **dict(counts._mapping),
         "publish_mode": PUBLISH_MODE,
         "embedded": analyzed,
         "ai_configured": bool(
             os.environ.get("AI_BASE_URL")
-            and os.environ.get("AI_EMBEDDING_MODEL")
             and os.environ.get("AI_CHAT_MODEL")
             and (
                 os.environ.get("AI_API_KEY")
@@ -869,77 +878,25 @@ async def extract_documented_affiliation(
 
 @app.post("/api/admin/analyze")
 async def analyze_papers(
-    limit: int = Query(default=20, ge=2, le=100),
+    limit: int = Query(default=500, ge=2, le=5000),
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
+    """Embed the next papers with the free local embedder and refresh the subtopic groups.
+    For the whole archive, run `python -m backend.analysis_pipeline all` instead."""
     require_admin(authorization)
-    embedding_model = os.environ.get("AI_EMBEDDING_MODEL", "")
-    if not embedding_model:
-        raise HTTPException(status_code=503, detail="Configure AI_EMBEDDING_MODEL to enable embeddings.")
-    with connect_db() as connection:
-        rows = connection.execute(
-            """
-            SELECT arxiv_id, title, abstract, analysis FROM papers
-            WHERE analysis NOT LIKE ?
-            ORDER BY published_at DESC, arxiv_id DESC LIMIT ?
-            """,
-            (f'%"embedding_model": "{embedding_model}"%', limit),
-        ).fetchall()
-    unanalyzed = [
-        row for row in rows
-        if json.loads(row["analysis"]).get("embedding_model") != embedding_model
-    ]
-    if len(unanalyzed) < 2:
-        raise HTTPException(status_code=409, detail="At least two papers without embeddings are required.")
-    texts = [f"{row['title']}\n\n{row['abstract']}" for row in unanalyzed]
-    embeddings = await asyncio.to_thread(generate_embeddings, texts)
-    with connect_db() as connection:
-        for row, embedding in zip(unanalyzed, embeddings, strict=True):
-            analysis = json.loads(row["analysis"])
-            analysis["embedding"] = embedding
-            analysis["embedding_model"] = embedding_model
-            connection.execute(
-                "UPDATE papers SET analysis = ? WHERE arxiv_id = ?",
-                (json.dumps(analysis, ensure_ascii=False), row["arxiv_id"]),
-            )
-        embedded_rows = connection.execute(
-            "SELECT arxiv_id, analysis FROM papers"
-        ).fetchall()
 
-    vectors = []
-    paper_ids = []
-    dimension = len(embeddings[0])
-    for row in embedded_rows:
-        analysis = json.loads(row["analysis"])
-        embedding = analysis.get("embedding")
-        if (
-            analysis.get("embedding_model") == embedding_model
-            and isinstance(embedding, list)
-            and len(embedding) == dimension
-        ):
-            vectors.append(embedding)
-            paper_ids.append(row["arxiv_id"])
-    cluster_count = min(12, max(2, round(len(vectors) ** 0.5))) if len(vectors) > 1 else 1
-    if len(vectors) > 1:
-        from sklearn.cluster import KMeans
+    def run() -> dict[str, Any]:
+        embedded = analysis_pipeline.embed_papers(ENGINE, limit=limit, log=lambda _message: None)
+        grouped = analysis_pipeline.cluster_papers(ENGINE, model=embedded["model"], log=lambda _message: None)
+        return {"embedded": embedded, "grouped": grouped}
 
-        labels = KMeans(n_clusters=cluster_count, random_state=42, n_init=10).fit_predict(vectors)
-    else:
-        labels = [0]
-    with connect_db() as connection:
-        for arxiv_id, label in zip(paper_ids, labels, strict=True):
-            row = connection.execute("SELECT analysis FROM papers WHERE arxiv_id = ?", (arxiv_id,)).fetchone()
-            analysis = json.loads(row["analysis"])
-            analysis["topic_cluster"] = f"cluster-{int(label) + 1}"
-            connection.execute(
-                "UPDATE papers SET analysis = ? WHERE arxiv_id = ?",
-                (json.dumps(analysis, ensure_ascii=False), arxiv_id),
-            )
+    result = await asyncio.to_thread(run)
+    status = analysis_pipeline.status(ENGINE)
     return {
-        "analyzed": len(unanalyzed),
-        "embedded_papers": len(paper_ids),
-        "clusters": cluster_count,
-        "method": "OpenAI-compatible embeddings with deterministic K-Means clustering",
+        "analyzed": result["embedded"]["embedded"],
+        "embedded_papers": status["embedded"],
+        "clusters": status["subtopics"],
+        "method": f"{result['embedded']['model']} embeddings with K-Means subtopics in each category",
     }
 
 

@@ -67,7 +67,7 @@ class AffiliationScanTests(unittest.TestCase):
     def test_scan_fills_missing_affiliations_and_never_overwrites(self):
         with mock.patch.object(affiliation_scan, "fetch_openalex", return_value={"2601.00001": WORK}), \
                 mock.patch.object(affiliation_scan.time, "sleep"):
-            state = affiliation_scan.run_scan(self.engine)
+            state = affiliation_scan.run_scan(self.engine, use_openalex=True)
         self.assertEqual(state["status"], "complete")
         self.assertEqual(state["checked"], 2)
         self.assertEqual(state["found"], 1)
@@ -80,11 +80,21 @@ class AffiliationScanTests(unittest.TestCase):
         self.assertEqual(self.row("2601.00002")[0], None)
         self.assertEqual(self.row("2601.00003")[0], "Admin Entered Lab")
 
+    def test_default_sources_read_pdfs_without_calling_openalex(self):
+        with mock.patch.dict("os.environ", {"AFFILIATION_SOURCES": ""}), \
+                mock.patch.object(affiliation_scan, "fetch_openalex", side_effect=AssertionError("OpenAlex used")), \
+                mock.patch.object(affiliation_scan, "pdf_first_page_text", return_value=PDF_TEXT), \
+                mock.patch.object(affiliation_scan.time, "sleep"):
+            state = affiliation_scan.run_scan(self.engine)
+        self.assertEqual(state["found_pdf"], 2)
+        self.assertEqual(state["found_openalex"], 0)
+        self.assertEqual(self.row("2601.00001")[0], "University of Lagos")
+
     def test_pdf_fallback_used_when_openalex_has_no_record(self):
         with mock.patch.object(affiliation_scan, "fetch_openalex", return_value={}), \
                 mock.patch.object(affiliation_scan, "pdf_first_page_text", return_value=PDF_TEXT), \
                 mock.patch.object(affiliation_scan.time, "sleep"):
-            state = affiliation_scan.run_scan(self.engine, pdf_fallback=True)
+            state = affiliation_scan.run_scan(self.engine, pdf_fallback=True, use_openalex=True)
         self.assertEqual(state["found_pdf"], 2)
         institution, country, analysis = self.row("2601.00002")
         self.assertEqual((institution, country), ("University of Lagos", "Nigeria"))
@@ -94,12 +104,12 @@ class AffiliationScanTests(unittest.TestCase):
         error = affiliation_scan.OpenAlexBudgetExhausted("budget used up")
         with mock.patch.object(affiliation_scan, "fetch_openalex", side_effect=error), \
                 mock.patch.object(affiliation_scan.time, "sleep"):
-            state = affiliation_scan.run_scan(self.engine)
+            state = affiliation_scan.run_scan(self.engine, use_openalex=True)
         self.assertEqual(state["status"], "paused")
         self.assertIn("budget", state["error"])
         with mock.patch.object(affiliation_scan, "fetch_openalex", return_value={"2601.00001": WORK}), \
                 mock.patch.object(affiliation_scan.time, "sleep"):
-            state = affiliation_scan.run_scan(self.engine)
+            state = affiliation_scan.run_scan(self.engine, use_openalex=True)
         self.assertEqual(state["status"], "complete")
         self.assertEqual(state["found"], 1)
 
