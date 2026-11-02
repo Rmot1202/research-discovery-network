@@ -38,7 +38,9 @@ STOP_WORDS = {
 }
 
 _index_lock = threading.Lock()
-_last_index_sync = 0.0
+# Last sync time per database. Starts empty: time.monotonic() can be under a minute on a freshly
+# booted machine (CI runners), so a 0.0 default would wrongly skip the first index build.
+_last_index_sync: dict[str, float] = {}
 INDEX_SYNC_INTERVAL = 60.0
 
 
@@ -59,12 +61,12 @@ def extract_keywords(question: str, limit: int = 12) -> list[str]:
 
 def ensure_search_index(engine: Engine, *, force: bool = False) -> None:
     """Create (once) and incrementally sync the full-text index over every paper."""
-    global _last_index_sync
+    key = str(engine.url)
     now = time.monotonic()
-    if not force and now - _last_index_sync < INDEX_SYNC_INTERVAL:
+    if not force and key in _last_index_sync and now - _last_index_sync[key] < INDEX_SYNC_INTERVAL:
         return
     with _index_lock:
-        if not force and time.monotonic() - _last_index_sync < INDEX_SYNC_INTERVAL:
+        if not force and key in _last_index_sync and time.monotonic() - _last_index_sync[key] < INDEX_SYNC_INTERVAL:
             return
         with engine.begin() as connection:
             if engine.dialect.name == "sqlite":
@@ -82,7 +84,7 @@ def ensure_search_index(engine: Engine, *, force: bool = False) -> None:
                     "CREATE INDEX IF NOT EXISTS idx_papers_fulltext ON papers USING GIN "
                     "(to_tsvector('english', coalesce(title, '') || ' ' || coalesce(abstract, '')))"
                 ))
-        _last_index_sync = time.monotonic()
+        _last_index_sync[key] = time.monotonic()
 
 
 def _keyword_candidates(

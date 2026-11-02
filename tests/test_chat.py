@@ -41,7 +41,7 @@ class PaperChatTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.engine = make_archive(Path(self.tmp.name) / "papers.sqlite3")
-        paper_chat._last_index_sync = 0.0
+        paper_chat._last_index_sync.clear()
 
     def tearDown(self):
         self.engine.dispose()

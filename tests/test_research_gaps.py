@@ -22,7 +22,7 @@ class ResearchGapTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.engine = create_database_engine(f"sqlite:///{Path(self.tmp.name) / 'papers.sqlite3'}")
         research_gaps._cache.update({"built": 0.0, "count": -1, "corpus": None})
-        paper_chat._last_index_sync = 0.0
+        paper_chat._last_index_sync.clear()
         with database_connection(self.engine) as connection:
             connection.execute(
                 "CREATE TABLE papers (arxiv_id TEXT PRIMARY KEY, raw_metadata TEXT NOT NULL, analysis TEXT NOT NULL, "
