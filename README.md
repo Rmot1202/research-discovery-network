@@ -250,7 +250,7 @@ Two separate scores, both 0–100 where higher means more of a gap. They are com
 
 Verdicts: ≥ 62 under-researched (“growing” if output rose ≥ 30%), ≥ 45 developing, otherwise well developed. Confidence is low below 30 papers, medium below 300, high above.
 
-### Score 2: underrepresented (whose work is visible)
+### Score 2: underrepresented (who the work in the collection comes from)
 
 Average of country concentration and institution concentration, each `100 × (1 − normalised Shannon entropy)` over every documented institution/country on the matching papers. It is reported only when at least 10 papers have documented affiliations; otherwise it shows “Not enough documented affiliations”. Run the paper scan above to fill them. Verdicts: ≥ 60 underrepresented, ≥ 40 somewhat concentrated, otherwise broadly represented.
 
@@ -449,18 +449,62 @@ Protected reviewer endpoints:
 
 ## Ranking and limitations
 
-The representation score is a transparent weighted average of the rarity
-components that have documented data:
+### Discovery Score (paper level, MVP)
+
+Each paper gets a 0–100 **Discovery Score** built from three separate factors.
+Every factor compares the paper with other papers in the **same field** (its
+primary arXiv category, for example `cs.CV`):
+
+| Factor | Default weight | What is counted inside the field |
+| --- | --- | --- |
+| Topic underrepresentation | 40% | papers in the paper's subtopic vs. the field's other subtopics (from `analysis_pipeline cluster`; until a field is clustered, the field itself vs. the other CS categories) |
+| Institutional underrepresentation | 30% | papers from the paper's documented institution vs. other institutions in the field |
+| Geographic underrepresentation | 30% | papers from the paper's documented country vs. other countries in the field |
+
+Each factor is normalized the same way, on a log scale within the field:
 
 ```text
-topic rarity          = 100 × (1 − papers in primary topic / category assignments)
-institution visibility = 100 × (1 − papers at institution / imported papers)
-geographic visibility  = 100 × (1 − papers in country / imported papers)
-score                  = available weighted average (topic 60%, institution 25%, geography 15%)
+factor = 100 × (ln(largest group) − ln(this group)) / (ln(largest group) − ln(smallest group))
 ```
 
-Institution and geographic components remain unavailable unless their
-affiliation data is documented and reviewed. Names are never used to infer
+100 = the least common group in the field, 0 = the most common (all groups the
+same size → 0). The log scale stops one huge group from pushing everyone else to
+the top. A factor is left out when the value is not documented or the field has
+fewer than 20 documented papers (`DISCOVERY_MIN_FIELD_SAMPLE`).
+
+```text
+Discovery Score = Σ(weight × factor) / Σ(weights of the factors that are available)
+```
+
+`coverage` reports how much of the full weight was available (1.0 = all three).
+
+**One strong factor is enough.** A paper is flagged as underrepresented when
+the Discovery Score is ≥ 60 (`DISCOVERY_OVERALL_THRESHOLD`) **or** any single
+factor is ≥ 75 (`DISCOVERY_FACTOR_THRESHOLD`). So a rare topic from a large
+institution, or a common topic from a rarely seen country, still shows up, with
+the reason ("Underrepresented topic", "Underrepresented country or region", …).
+
+**Representation, not visibility.** The score only measures how often something
+appears in the imported arXiv dataset. It says nothing about whether the work is
+getting attention; citations, downloads and other visibility signals are planned
+for a later version.
+
+**Experimenting with weights.** Set `DISCOVERY_WEIGHTS="topic=0.5,institution=0.25,geography=0.25"`
+(any numbers; they are rescaled to sum to 1), or pass `?weights=topic=50,institution=25,geography=25`
+to any endpoint below.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/papers?sort=score` | papers ranked by Discovery Score (the site's "Sort by → Discovery Score") |
+| `GET /api/discovery?category=cs.CV&factor=geography&min_factors=2` | ranked list; `factor` keeps papers flagged on that factor, `min_factors` keeps papers with at least that many measurable factors |
+| `GET /api/discovery/fields/cs.CV` | least represented subtopics, institutions and countries in one field |
+
+Every paper in the API carries `discovery_score` and a `discovery` object with
+`factors`, `weights`, `coverage`, `flags`, `reasons` and `topic_basis`. The code is
+in `backend/discovery_score.py`; tests in `tests/test_discovery_score.py`.
+
+Institution and geography factors stay empty until affiliation data is
+documented (PDF scan or manual entry). Names are never used to infer
 identity, affiliation, country, or demographics. Similar topic frequency is
 not evidence of research quality or intent.
 
