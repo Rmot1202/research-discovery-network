@@ -530,3 +530,27 @@ h1 em { color: #209c84; font-style: normal; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* Drill-down level of the topic map */
+.drill-panel { width: 270px; }
+.drill-panel h2 { max-width: 225px; }
+.drill-panel p { margin: 4px 0 10px; color: #c4dbd6; font-size: 12px; line-height: 1.5; }
+.drill-panel .crumb { display: block; margin: 0 0 8px; padding: 0; border: 0; background: none; color: #7fe3c7; font-size: 11px; font-weight: 700; cursor: pointer; text-align: left; }
+.drill-panel .crumb:hover { text-decoration: underline; }
+.drill-list { display: grid; gap: 6px; margin: 6px 0 12px; }
+.drill-list button { display: grid; grid-template-columns: 10px 1fr; column-gap: 8px; align-items: start; width: 100%; padding: 8px 9px; border: 1px solid rgba(157,216,204,.16); border-radius: 10px; background: rgba(255,255,255,.04); color: #e8f6f3; text-align: left; cursor: pointer; }
+.drill-list button:hover, .drill-list button:focus-visible { border-color: rgba(127,227,199,.6); background: rgba(127,227,199,.09); }
+.drill-list i { width: 9px; height: 9px; margin-top: 3px; border-radius: 50%; }
+.drill-list span { font-size: 12px; font-weight: 600; line-height: 1.3; }
+.drill-list small { grid-column: 2; color: #8fb3ac; font-size: 10px; }
+.drill-terms { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 10px; }
+.drill-terms span { padding: 2px 7px; border-radius: 999px; background: rgba(127,227,199,.12); color: #bff3e3; font-size: 10px; }
+.drill-source { display: block; margin: 0 0 10px; color: #8fb3ac; font-size: 10.5px; line-height: 1.4; }
+.drill-authors { color: #9fc9c0 !important; font-size: 11px !important; }
+.drill-affil { color: #7fe3c7 !important; font-size: 11px !important; }
+.drill-paper a.panel-action { text-decoration: none; }
+.secondary-action { background: transparent !important; border: 1px solid rgba(157,216,204,.3) !important; }
+.panel-tip { display: block; margin: -2px 0 8px; color: #8fb3ac; font-size: 10px; }
+.map-controls .drill-back { background: #7fe3c7; color: #062026; font-weight: 800; }
+.map-hint b { color: #ffd27a; font-weight: 700; }
+@media (max-width: 760px) { .drill-panel { width: auto; } }

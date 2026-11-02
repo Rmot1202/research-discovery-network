@@ -154,3 +154,27 @@ export type AffiliationScanProgress = {
   documented_pct: number
   is_running: boolean
 }
+
+export type DrillPaper = {
+  arxiv_id: string
+  title: string
+  authors: string[]
+  author_count: number
+  published_at: string
+  institution: string | null
+  country: string | null
+  url: string
+  summary?: string | null
+  key_contribution?: string | null
+  relevance?: string | null
+  abstract: string
+}
+export type Subtopic = { id: string; label: string; terms: string[]; size: number; papers: DrillPaper[] }
+export type TopicDrilldown = {
+  code: string
+  label: string
+  total_papers: number
+  source: 'embeddings' | 'keywords'
+  clusters: Subtopic[]
+}
+export type MapCommand = { type: 'select' | 'drill' | 'paper' | 'exit'; code?: string; id: number }

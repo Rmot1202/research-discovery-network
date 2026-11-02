@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ForceGraph3D, { type ForceGraph3DInstance } from '3d-force-graph'
 import SpriteText from 'three-spritetext'
 import * as THREE from 'three'
-import type { GapTopic, Topic, TopicLink } from '../types'
+import { apiRequest } from '../api'
+import type { DrillPaper, GapTopic, MapCommand, Subtopic, Topic, TopicDrilldown, TopicLink } from '../types'
 import { gapColor } from './ResearchGaps'
 import { ArrowIcon, SparkIcon } from './Icons'
 
@@ -18,13 +19,25 @@ type TopicNetworkProps = {
   onClear: () => void
   onAsk?: (topic: Topic) => void
   gapByCode?: Record<string, GapTopic>
+  command?: MapCommand | null
 }
+
+type DrillState = { topic: Topic; data: TopicDrilldown | null; error: string }
+const DOUBLE_CLICK_MS = 450
+const SUBTOPIC_COLORS = ['#ff6b7f', '#3fe08f', '#36d6ec', '#7c8cff', '#e46bff', '#ffb23f', '#7ff0c8', '#ff9a5c', '#b8e35a', '#5ec8ff']
 
 type BrainNode = {
   id: string
   label: string
   count: number
   region: RegionKey
+  kind?: 'topic' | 'center' | 'subtopic' | 'paper'
+  color?: string
+  paper?: DrillPaper
+  subtopicId?: string
+  fx?: number
+  fy?: number
+  fz?: number
   x?: number
   y?: number
   z?: number
@@ -61,6 +74,39 @@ const REGION_BY_CODE: Record<string, RegionKey> = {
 }
 
 const linkEndId = (end: string | BrainNode) => (typeof end === 'string' ? end : end.id)
+const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] ?? char)
+
+// Evenly spread points on a sphere (Fibonacci lattice) for the fixed drill-down layout.
+function spherePoints(count: number, radius: number): [number, number, number][] {
+  if (count === 1) return [[0, 0, radius]]
+  return Array.from({ length: count }, (_, index) => {
+    const y = 1 - (index / (count - 1)) * 2
+    const ring = Math.sqrt(1 - y * y)
+    const theta = index * Math.PI * (3 - Math.sqrt(5))
+    return [Math.cos(theta) * ring * radius, y * radius * 0.7, Math.sin(theta) * ring * radius]
+  })
+}
+
+function buildDrillGraph(topic: Topic, data: TopicDrilldown) {
+  const region = REGION_BY_CODE[topic.code] ?? 'human'
+  const nodes: BrainNode[] = [{ id: `center:${topic.code}`, label: topic.label, count: data.total_papers, region, kind: 'center', fx: 0, fy: 0, fz: 0 }]
+  const links: BrainLink[] = []
+  const ring = spherePoints(data.clusters.length, 120)
+  data.clusters.forEach((cluster, index) => {
+    const [x, y, z] = ring[index]
+    const color = SUBTOPIC_COLORS[index % SUBTOPIC_COLORS.length]
+    nodes.push({ id: cluster.id, label: cluster.label, count: cluster.size, region, kind: 'subtopic', color, fx: x, fy: y, fz: z })
+    links.push({ source: `center:${topic.code}`, target: cluster.id, shared_papers: cluster.size, strength: 0.6 })
+    const around = spherePoints(Math.max(cluster.papers.length, 2), 30)
+    cluster.papers.forEach((paper, paperIndex) => {
+      const [dx, dy, dz] = around[paperIndex]
+      const id = `paper:${paper.arxiv_id}`
+      nodes.push({ id, label: paper.title, count: 1, region, kind: 'paper', color, paper, subtopicId: cluster.id, fx: x + dx, fy: y + dy, fz: z + dz })
+      links.push({ source: cluster.id, target: id, shared_papers: 1, strength: 0.15 })
+    })
+  })
+  return { nodes, links }
+}
 
 function seededRandom(seed: number) {
   let value = seed
@@ -184,6 +230,7 @@ export default function TopicNetwork({
   onClear,
   onAsk,
   gapByCode = {},
+  command = null,
 }: TopicNetworkProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const graphRef = useRef<ForceGraph3DInstance | null>(null)
@@ -198,6 +245,13 @@ export default function TopicNetwork({
   const [isTouring, setIsTouring] = useState(false)
   const [hovered, setHovered] = useState<BrainNode | null>(null)
   const [colorMode, setColorMode] = useState<'regions' | 'gaps'>('regions')
+  const [drill, setDrill] = useState<DrillState | null>(null)
+  const [focusId, setFocusId] = useState('')
+  const [openPaper, setOpenPaper] = useState<DrillPaper | null>(null)
+  const drillRef = useRef<DrillState | null>(null)
+  const lastClickRef = useRef({ id: '', at: 0 })
+  const nodeClickRef = useRef<(node: BrainNode) => void>(() => undefined)
+  drillRef.current = drill
   const hasGaps = Object.keys(gapByCode).length > 0
   const reducedMotion = useMemo(
     () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
@@ -225,13 +279,14 @@ export default function TopicNetwork({
   const flyTo = useCallback((code: string, duration = 1600) => {
     const graph = graphRef.current
     const node = nodeCache.current.get(code)
+      ?? (graph?.graphData().nodes as BrainNode[] | undefined)?.find((entry) => entry.id === code)
     if (!graph || !node || node.x === undefined) return
     const x = node.x ?? 0
     const y = node.y ?? 0
     const z = node.z ?? 0
     const length = Math.hypot(x, y, z) || 1
     // Approach from outside the node, looking at it, so the camera travels through the brain.
-    const distance = 95
+    const distance = node.kind === 'paper' ? 45 : node.kind === 'subtopic' ? 110 : 95
     graph.cameraPosition(
       { x: x + (x / length) * distance, y: y + (y / length) * distance + 12, z: z + (z / length) * distance },
       { x, y, z },
@@ -266,19 +321,35 @@ export default function TopicNetwork({
       .nodeOpacity(0.96)
       .nodeLabel((node) => {
         const item = node as BrainNode
+        if (item.kind === 'paper' && item.paper) {
+          return `<div class="graph-tooltip"><b>${escapeHtml(item.paper.title)}</b><span>${item.paper.published_at.slice(0, 10)} · ${escapeHtml(item.paper.authors.slice(0, 2).join(', '))}${item.paper.author_count > 2 ? ' et al.' : ''}</span><em>Click to read the summary</em></div>`
+        }
+        if (item.kind === 'subtopic') {
+          return `<div class="graph-tooltip"><b>${escapeHtml(item.label)}</b><span>${item.count.toLocaleString()} papers</span><em>Click to see its papers</em></div>`
+        }
+        if (item.kind === 'center') {
+          return `<div class="graph-tooltip"><b>${escapeHtml(item.label)}</b><span>${item.count.toLocaleString()} papers</span><em>Use “All topics” to go back</em></div>`
+        }
         return `<div class="graph-tooltip"><b>${item.label}</b><span>${item.id} · ${item.count.toLocaleString()} papers</span><em>${REGIONS[item.region].name}</em></div>`
       })
       .nodeThreeObjectExtend(true)
       .nodeThreeObject((node) => {
         const item = node as BrainNode
-        const sprite = new SpriteText(item.id.replace('cs.', ''))
+        if (item.kind === 'paper') return new THREE.Group()
+        const text = item.kind === 'subtopic' ? (item.label.length > 34 ? `${item.label.slice(0, 32)}…` : item.label)
+          : item.kind === 'center' ? item.label : item.id.replace('cs.', '')
+        const sprite = new SpriteText(text)
         sprite.color = '#f2fffb'
         sprite.textHeight = 5.2
         sprite.fontWeight = '700'
         sprite.backgroundColor = 'rgba(6,24,30,0.55)'
         sprite.padding = 1.4
         sprite.borderRadius = 3
-        const radius = Math.cbrt(1 + 38 * Math.sqrt(item.count / maxCountRef.current)) * 4
+        if (item.kind === 'subtopic' || item.kind === 'center') {
+          sprite.textHeight = item.kind === 'center' ? 7 : 4.6
+          sprite.backgroundColor = 'rgba(6,24,30,0.72)'
+        }
+        const radius = item.kind === 'subtopic' ? 9 : item.kind === 'center' ? 13 : Math.cbrt(1 + 38 * Math.sqrt(item.count / maxCountRef.current)) * 4
         sprite.position.set(0, radius + 5, 0)
         sprite.material.depthWrite = false
         return sprite
@@ -289,13 +360,7 @@ export default function TopicNetwork({
         container.style.cursor = node ? 'pointer' : 'grab'
         setHovered((node as BrainNode | null) ?? null)
       })
-      .onNodeClick((node) => {
-        const item = node as BrainNode
-        stopTour()
-        const topic = topicsRef.current.find((entry) => entry.code === item.id)
-        if (topic) onSelectRef.current(topic)
-        flyTo(item.id)
-      })
+      .onNodeClick((node) => nodeClickRef.current(node as BrainNode))
       .onBackgroundClick(() => stopTour())
       .cooldownTicks(220)
       .onEngineStop(() => {
@@ -376,10 +441,95 @@ export default function TopicNetwork({
     }
   }, [flyTo, reducedMotion, stopTour])
 
+  // Second click on a topic (or a double-click) opens its subtopics and papers.
+  const enterDrill = useCallback((topic: Topic) => {
+    stopTour()
+    setFocusId('')
+    setOpenPaper(null)
+    setDrill({ topic, data: null, error: '' })
+    apiRequest<TopicDrilldown>(`/api/topics/${encodeURIComponent(topic.code)}/subtopics?papers=8`)
+      .then((data) => setDrill((current) => (current?.topic.code === topic.code ? { ...current, data } : current)))
+      .catch((error: unknown) => setDrill((current) => (current?.topic.code === topic.code
+        ? { ...current, error: error instanceof Error ? error.message : 'Could not load subtopics.' } : current)))
+  }, [stopTour])
+
+  const exitDrill = useCallback(() => {
+    const code = drillRef.current?.topic.code
+    setDrill(null)
+    setFocusId('')
+    setOpenPaper(null)
+    window.setTimeout(() => { if (code) flyTo(code, 1200) }, 350)
+  }, [flyTo])
+
+  const focusSubtopic = useCallback((id: string) => {
+    setFocusId(id)
+    setOpenPaper(null)
+    flyTo(id, 1200)
+  }, [flyTo])
+
+  const showPaper = useCallback((paper: DrillPaper, subtopicId?: string) => {
+    if (subtopicId) setFocusId(subtopicId)
+    setOpenPaper(paper)
+    flyTo(`paper:${paper.arxiv_id}`, 1100)
+  }, [flyTo])
+
+  nodeClickRef.current = (item: BrainNode) => {
+    stopTour()
+    const now = Date.now()
+    const repeated = lastClickRef.current.id === item.id && now - lastClickRef.current.at < DOUBLE_CLICK_MS
+    lastClickRef.current = { id: item.id, at: now }
+    if (item.kind === 'paper' && item.paper) { showPaper(item.paper, item.subtopicId); return }
+    if (item.kind === 'subtopic') { focusSubtopic(item.id); return }
+    if (item.kind === 'center') { setFocusId(''); setOpenPaper(null); return }
+    const topic = topicsRef.current.find((entry) => entry.code === item.id)
+    if (!topic) return
+    if (repeated || selectedRef.current === item.id) { enterDrill(topic); return }
+    onSelectRef.current(topic)
+    flyTo(item.id)
+  }
+
+  // Commands from the guided demo (select a topic, open it, open a paper, go back).
+  useEffect(() => {
+    if (!command) return
+    if (command.type === 'exit') { if (drillRef.current) exitDrill(); return }
+    if (command.type === 'paper') {
+      const cluster = drillRef.current?.data?.clusters.find((entry) => entry.papers.length)
+      if (cluster) showPaper(cluster.papers[0], cluster.id)
+      return
+    }
+    const topic = topics.find((entry) => entry.code === command.code) ?? [...topics].sort((a, b) => b.count - a.count)[0]
+    if (!topic) return
+    if (command.type === 'select') {
+      if (drillRef.current) setDrill(null)
+      onSelectRef.current(topic)
+      window.setTimeout(() => flyTo(topic.code), drillRef.current ? 400 : 0)
+    } else {
+      onSelectRef.current(topic)
+      enterDrill(topic)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [command])
+
+  // Swap the scene to the drill-down level (fixed layout) when its data arrives.
+  useEffect(() => {
+    const graph = graphRef.current
+    if (!graph || !drill?.data) return
+    const shell = graph.scene().getObjectByName('brain-shell')
+    if (shell) shell.visible = false
+    const { nodes, links: drillLinks } = buildDrillGraph(drill.topic, drill.data)
+    graph.nodeVal((node) => {
+      const item = node as BrainNode
+      return item.kind === 'center' ? 26 : item.kind === 'subtopic' ? 4 + 14 * Math.sqrt(item.count / Math.max(1, drill.data?.total_papers ?? 1)) : 1.1
+    }).graphData({ nodes, links: drillLinks })
+    graph.cameraPosition({ x: 0, y: 90, z: 330 }, { x: 0, y: 0, z: 0 }, reducedMotion ? 0 : 1300)
+  }, [drill, reducedMotion])
+
   // Push topic data into the scene, reusing node objects so positions are stable.
   useEffect(() => {
     const graph = graphRef.current
-    if (!graph) return
+    if (!graph || drill) return
+    const shell = graph.scene().getObjectByName('brain-shell')
+    if (shell) shell.visible = true
     const nodes: BrainNode[] = topics.map((topic) => {
       const existing = nodeCache.current.get(topic.code)
       const region = REGION_BY_CODE[topic.code] ?? 'human'
@@ -403,12 +553,31 @@ export default function TopicNetwork({
     graph
       .nodeVal((node) => 1 + 38 * Math.sqrt((node as BrainNode).count / maxTopicCount))
       .graphData({ nodes, links: graphLinks })
-  }, [links, maxLinkWeight, maxTopicCount, topics])
+  }, [drill, links, maxLinkWeight, maxTopicCount, topics])
 
   // Re-style nodes and links when the selection changes.
   useEffect(() => {
     const graph = graphRef.current
     if (!graph) return
+    if (drill) {
+      const focusPapers = (link: BrainLink) => linkEndId(link.source) === focusId
+      graph
+        .nodeColor((node) => {
+          const item = node as BrainNode
+          if (item.kind === 'center') return '#f2fffb'
+          if (item.kind === 'paper' && openPaper && item.paper?.arxiv_id === openPaper.arxiv_id) return '#ffffff'
+          const color = item.color ?? '#9effe3'
+          const dimmed = focusId && item.id !== focusId && item.subtopicId !== focusId
+          if (item.kind === 'paper') return new THREE.Color(color).lerp(new THREE.Color('#ffffff'), 0.35).multiplyScalar(dimmed ? 0.4 : 1).getStyle()
+          return dimmed ? new THREE.Color(color).multiplyScalar(0.45).getStyle() : color
+        })
+        .linkColor((link) => (focusPapers(link as BrainLink) ? '#ffd27a' : 'rgba(150,200,195,0.5)'))
+        .linkWidth((link) => (focusPapers(link as BrainLink) ? 1.2 : 0.5))
+        .linkDirectionalParticles((link) => (reducedMotion ? 0 : focusPapers(link as BrainLink) ? 2 : 0))
+        .linkDirectionalParticleWidth(1.6)
+        .linkDirectionalParticleColor(() => '#fff2c4')
+      return
+    }
     const related = new Set<string>([selectedId])
     for (const link of links) {
       if (link.source === selectedId) related.add(link.target)
@@ -440,7 +609,7 @@ export default function TopicNetwork({
       })
       .linkDirectionalParticleWidth((link) => (isRelated(link as BrainLink) ? 2.4 : 1.4))
       .linkDirectionalParticleColor((link) => (isRelated(link as BrainLink) ? '#fff2c4' : '#9effe3'))
-  }, [colorMode, gapByCode, links, reducedMotion, selectedId])
+  }, [colorMode, drill, focusId, gapByCode, links, openPaper, reducedMotion, selectedId])
 
   useEffect(() => () => stopTour(), [stopTour])
 
@@ -487,15 +656,21 @@ export default function TopicNetwork({
       <div className="map-toolbar">
         <div><span className="live-dot" /><strong>Research signal · 3D topic brain</strong><small>{isLoading ? 'Loading…' : `${totalPapers.toLocaleString()} papers`}</small></div>
         <div className="map-controls">
-          {hasGaps && (
+          {hasGaps && !drill && (
             <div className="color-toggle" role="group" aria-label="Color nodes by">
               <span>Color</span>
               <button aria-pressed={colorMode === 'regions'} onClick={() => setColorMode('regions')}>Regions</button>
               <button aria-pressed={colorMode === 'gaps'} onClick={() => setColorMode('gaps')}>Gap index</button>
             </div>
           )}
-          <button onClick={startTour} aria-pressed={isTouring}>{isTouring ? 'Stop tour' : 'Fly-through tour'}</button>
-          <button onClick={resetView}>Reset view</button>
+          {drill ? (
+            <button className="drill-back" onClick={exitDrill}>← All topics</button>
+          ) : (
+            <>
+              <button onClick={startTour} aria-pressed={isTouring}>{isTouring ? 'Stop tour' : 'Fly-through tour'}</button>
+              <button onClick={resetView}>Reset view</button>
+            </>
+          )}
         </div>
       </div>
       <div className="network network-3d">
@@ -527,10 +702,27 @@ export default function TopicNetwork({
         )}
         <div className="map-hint">
           <span>{topics.length} categories</span><i />
-          Drag to rotate · scroll to zoom · W A S D / Q E to fly · click a node to travel
+          {drill
+            ? <>Inside {drill.topic.label}: big spheres are subtopics, small dots are papers · click a dot to read it</>
+            : <>Drag to rotate · scroll to zoom · click a topic to travel · <b>click it again to look inside</b></>}
         </div>
+        {drill && !drill.data && !drill.error && <div className="api-status" role="status">Opening {drill.topic.label}…</div>}
+        {drill?.error && <div className="api-status error" role="status">{drill.error}</div>}
       </div>
-      {selected && (
+      {drill && (
+        <DrillPanel
+          drill={drill}
+          focusId={focusId}
+          paper={openPaper}
+          onBack={exitDrill}
+          onFocus={focusSubtopic}
+          onClearFocus={() => { setFocusId(''); setOpenPaper(null) }}
+          onPaper={showPaper}
+          onClosePaper={() => setOpenPaper(null)}
+          onAsk={onAsk ? () => onAsk(drill.topic) : undefined}
+        />
+      )}
+      {selected && !drill && (
         <aside className="detail-panel">
           <button className="close" onClick={() => { stopTour(); onClear() }} aria-label="Clear selected topic">×</button>
           <span className="panel-label">arXiv topic · {selected.code}</span>
@@ -575,6 +767,10 @@ export default function TopicNetwork({
               })}
             </div>
           )}
+          <button className="panel-action look-inside" onClick={() => enterDrill(selected)}>
+            Look inside: subtopics &amp; papers <ArrowIcon />
+          </button>
+          <small className="panel-tip">Tip: clicking the sphere again does the same.</small>
           <button className="panel-action" onClick={() => document.getElementById('papers')?.scrollIntoView({ behavior: 'smooth' })}>
             View papers in this topic <ArrowIcon />
           </button>
@@ -586,5 +782,90 @@ export default function TopicNetwork({
         </aside>
       )}
     </div>
+  )
+}
+
+
+type DrillPanelProps = {
+  drill: DrillState
+  focusId: string
+  paper: DrillPaper | null
+  onBack: () => void
+  onFocus: (id: string) => void
+  onClearFocus: () => void
+  onPaper: (paper: DrillPaper, subtopicId?: string) => void
+  onClosePaper: () => void
+  onAsk?: () => void
+}
+
+function DrillPanel({ drill, focusId, paper, onBack, onFocus, onClearFocus, onPaper, onClosePaper, onAsk }: DrillPanelProps) {
+  const clusters = drill.data?.clusters ?? []
+  const focused: Subtopic | undefined = clusters.find((cluster) => cluster.id === focusId)
+  const colorFor = (id: string) => SUBTOPIC_COLORS[Math.max(0, clusters.findIndex((cluster) => cluster.id === id)) % SUBTOPIC_COLORS.length]
+  return (
+    <aside className="detail-panel drill-panel" aria-live="polite">
+      <button className="close" onClick={onBack} aria-label="Back to all topics">×</button>
+      {paper ? (
+        <div className="drill-paper">
+          <button className="crumb" onClick={onClosePaper}>← {focused?.label ?? 'Subtopic'}</button>
+          <span className="panel-label">Paper · {paper.published_at.slice(0, 10)}</span>
+          <h2>{paper.title}</h2>
+          <p className="drill-authors">{paper.authors.join(', ')}{paper.author_count > paper.authors.length ? ' et al.' : ''}</p>
+          {(paper.institution || paper.country) && <p className="drill-affil">{[paper.institution, paper.country].filter(Boolean).join(' · ')}</p>}
+          {paper.summary ? (
+            <>
+              <span className="panel-label">Plain-language summary</span>
+              <p>{paper.summary}</p>
+              {paper.key_contribution && paper.key_contribution !== 'Not stated in the abstract' && (<><span className="panel-label">Key contribution</span><p>{paper.key_contribution}</p></>)}
+              {paper.relevance && paper.relevance !== 'Not stated in the abstract' && (<><span className="panel-label">Why it matters</span><p>{paper.relevance}</p></>)}
+            </>
+          ) : (
+            <><span className="panel-label">Abstract</span><p>{paper.abstract}</p></>
+          )}
+          <a className="panel-action" href={paper.url} target="_blank" rel="noreferrer">Open on arXiv <ArrowIcon /></a>
+          <a className="panel-action secondary-action" href={paper.url.replace('/abs/', '/pdf/')} target="_blank" rel="noreferrer">Read the PDF</a>
+        </div>
+      ) : focused ? (
+        <div>
+          <button className="crumb" onClick={onClearFocus}>← {drill.topic.label}</button>
+          <span className="panel-label">Subtopic · {focused.size.toLocaleString()} papers</span>
+          <h2>{focused.label}</h2>
+          {focused.terms.length > 0 && <div className="drill-terms">{focused.terms.slice(0, 6).map((term) => <span key={term}>{term}</span>)}</div>}
+          <span className="panel-label">Closest papers · click one</span>
+          <div className="drill-list">
+            {focused.papers.map((item) => (
+              <button key={item.arxiv_id} onClick={() => onPaper(item, focused.id)}>
+                <i style={{ background: colorFor(focused.id) }} />
+                <span>{item.title}</span>
+                <small>{item.published_at.slice(0, 10)}{item.summary ? ' · summary' : ''}</small>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div>
+          <button className="crumb" onClick={onBack}>← All topics</button>
+          <span className="panel-label">Inside {drill.topic.code}</span>
+          <h2>{drill.topic.label}</h2>
+          {drill.data && (
+            <small className="drill-source">
+              {drill.data.source === 'embeddings' ? 'Grouped by meaning (AI embeddings).' : 'Quick keyword grouping of recent papers. Run the analysis pipeline for AI grouping.'}
+            </small>
+          )}
+          <span className="panel-label">Subtopics · click one</span>
+          <div className="drill-list">
+            {clusters.map((cluster) => (
+              <button key={cluster.id} onClick={() => onFocus(cluster.id)}>
+                <i style={{ background: colorFor(cluster.id) }} />
+                <span>{cluster.label}</span>
+                <small>{cluster.size.toLocaleString()} papers</small>
+              </button>
+            ))}
+            {drill.data && !clusters.length && <p>No papers in this topic yet.</p>}
+          </div>
+          {onAsk && <button className="panel-action ask-action" onClick={onAsk}><SparkIcon /> Ask the research assistant</button>}
+        </div>
+      )}
+    </aside>
   )
 }
