@@ -41,7 +41,10 @@ def read_paper_rows(
     if year is not None:
         clauses.append("published_at LIKE ?")
         values.append(f"{year}%")
-    if approval_status:
+    if approval_status == "public":  # PUBLISH_MODE=auto: everything except rejected papers
+        clauses.append("approval_status <> ?")
+        values.append("rejected")
+    elif approval_status:
         clauses.append("approval_status = ?")
         values.append(approval_status)
     if query:
@@ -71,6 +74,8 @@ def read_paper_rows(
         "newest": "published_at DESC, arxiv_id DESC",
         "oldest": "published_at ASC, arxiv_id ASC",
         "title": "LOWER(title) ASC",
+        # PUBLISH_MODE=auto featured list: editor-approved papers first, then the newest.
+        "featured": "CASE WHEN approval_status = 'approved' THEN 0 ELSE 1 END, published_at DESC, arxiv_id DESC",
         "score": "(SELECT COUNT(*) FROM paper_categories AS topic_count "
         "WHERE topic_count.category = papers.primary_category) ASC, "
         "published_at DESC",

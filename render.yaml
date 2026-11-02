@@ -1,12 +1,16 @@
 # Render Blueprint: Dashboard -> New -> Blueprint -> pick this repo.
 # Creates the web app (API + website in one Docker service) and a PostgreSQL database.
+# New papers arrive daily via .github/workflows/update-papers.yml (needs the DATABASE_URL secret).
 services:
   - type: web
     name: research-discovery-network
     runtime: docker
     plan: free            # free instances sleep after 15 min idle; "starter" stays awake
     healthCheckPath: /api/health
+    autoDeployTrigger: checksPass  # CD: deploy each push to main only after GitHub CI passes
     envVars:
+      - key: PUBLISH_MODE
+        value: auto           # auto: new papers go public right away; review: only approved papers are featured
       - key: DATABASE_URL
         fromDatabase:
           name: research-discovery-db

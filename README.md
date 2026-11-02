@@ -284,12 +284,66 @@ visit after that takes about a minute), and free Render PostgreSQL databases
 expire after 30 days. Change the database plan to `basic-256mb`, or point
 `DATABASE_URL` at a free [Neon](https://neon.tech) database, to keep the data.
 
+### Keeping the site up to date (CI/CD)
+
+Two GitHub Actions workflows run automatically once the repo is on GitHub:
+
+| Workflow | When | What it does |
+|---|---|---|
+| `CI` (`.github/workflows/ci.yml`) | every push and pull request | type-checks and builds the site, runs the Python tests, builds the Docker image and checks that it starts |
+| `Update papers` (`.github/workflows/update-papers.yml`) | every day at 06:30 UTC, or by hand from the Actions tab | imports Computer Science papers arXiv added since the last run, then looks up their affiliations on OpenAlex |
+
+- **Code changes (CD):** `render.yaml` sets `autoDeployTrigger: checksPass`, so Render
+  deploys a push to `main` only after CI passes. A broken commit never goes live.
+- **New papers:** the update workflow writes straight into the hosted database, so the
+  live site shows them without a redeploy. One-time setup: in GitHub open
+  **Settings → Secrets and variables → Actions → New repository secret** and add
+  `DATABASE_URL` (the Render External Database URL). `OPENALEX_API_KEY` and
+  `OPENALEX_EMAIL` are optional. Or from a terminal: `gh secret set DATABASE_URL`.
+  If you change the database password, update this secret too.
+- **Catch up after a gap:** Actions → Update papers → Run workflow, and enter a start date.
+- **Locally:** `python -m backend.update_papers` (add `--since 2026-10-01` to choose the start date).
+
+### Publishing: auto or review
+
+The search, the 3D map and the gap scores always use every paper. Approval only
+controls the homepage **Featured papers** list:
+
+- `PUBLISH_MODE=auto` (set in `render.yaml`): new papers are public right away.
+  Featured shows editor picks first, then the newest papers. Rejecting a paper removes
+  it from Featured, and "Feature on homepage" in the Admin dashboard pins it to the top.
+- `PUBLISH_MODE=review` (the default when unset, as in the URD spec): Featured shows only
+  papers a reviewer approved.
+
+### Research scope
+
+Every arXiv CS category is included by default. To narrow it, set `RESEARCH_SCOPE=mvp`
+(AI, ML, NLP and closely related areas) or a list such as `RESEARCH_SCOPE=cs.AI,cs.LG,cs.CL`.
+New imports then skip papers outside the scope.
+
 ### The research assistant online
 
 Ollama only runs on your own machine, so the hosted site can't reach it. Set
 `AI_BASE_URL`/`AI_API_KEY`/`AI_CHAT_MODEL` to any hosted OpenAI-compatible
 provider (OpenAI, Groq, Together, OpenRouter, ...). Without one, the
 assistant still answers with cited search results, just without an LLM summary.
+
+### Using your own model instead of OpenAI or Groq
+
+The assistant talks to any OpenAI-compatible server, so you can run an open model you
+control. Point `AI_BASE_URL` at it and set `AI_CHAT_MODEL`.
+
+- **Run an open model (no training):** Llama, Qwen or Mistral through Ollama, vLLM or
+  llama.cpp. It knows the papers through retrieval (each answer is built from the papers
+  the search finds), so it doesn't need training to cover new papers.
+- **Fine-tune one (optional):** LoRA fine-tuning of a small model (about 1–8B
+  parameters) on approved summaries can teach it your summary style. That's possible on
+  one rented or free notebook GPU. Training a model from scratch is not realistic here.
+- **Hosting it:** a model needs a GPU or a large-memory machine, so it can't run on
+  Render's free plan. Options are your own computer (it must stay on and be reachable
+  over HTTPS, for example through a Cloudflare Tunnel), a GPU host such as Hugging Face
+  Inference Endpoints, Modal or RunPod, or batch jobs that write summaries into the
+  database ahead of time so the live site doesn't need the model at all.
 
 ### Option B: other hosts
 

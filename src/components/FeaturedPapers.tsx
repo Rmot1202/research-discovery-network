@@ -1,12 +1,13 @@
 import type { Paper } from '../types'
 import { ArrowIcon } from './Icons'
 
-export default function FeaturedPapers({ papers }: { papers: Paper[] }) {
+export default function FeaturedPapers({ papers, publishMode = 'review' }: { papers: Paper[]; publishMode?: 'review' | 'auto' }) {
+  const auto = publishMode === 'auto'
   return (
     <section className="featured-section" id="featured">
       <div className="paper-explorer-heading">
-        <div><span className="eyebrow">Human-reviewed research</span><h2>Featured papers</h2><p>Only papers approved by a reviewer appear in this public selection.</p></div>
-        <strong>{papers.length.toLocaleString()} featured</strong>
+        <div><span className="eyebrow">{auto ? 'Latest research' : 'Human-reviewed research'}</span><h2>Featured papers</h2><p>{auto ? 'Editor picks appear first, followed by the newest papers in the collection.' : 'Only papers approved by a reviewer appear in this public selection.'}</p></div>
+        <strong>{papers.length.toLocaleString()} {auto ? 'shown' : 'featured'}</strong>
       </div>
       {papers.length ? (
         <div className="featured-grid">

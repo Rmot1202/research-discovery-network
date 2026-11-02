@@ -72,7 +72,7 @@ export default function AdminDashboard(props: AdminDashboardProps) {
           {overview && (
             <div className="admin-stats">
               <span><strong>{overview.pending.toLocaleString()}</strong> pending</span>
-              <span><strong>{overview.approved.toLocaleString()}</strong> approved</span>
+              <span><strong>{overview.approved.toLocaleString()}</strong> {overview.publish_mode === 'auto' ? 'featured (auto-publish on)' : 'approved'}</span>
               <span><strong>{overview.embedded.toLocaleString()}</strong> embedded</span>
               <span><strong>{overview.documented_institutions.toLocaleString()}</strong> documented institutions</span>
               <span><strong>{overview.documented_countries.toLocaleString()}</strong> documented countries</span>
@@ -137,7 +137,7 @@ export default function AdminDashboard(props: AdminDashboardProps) {
                   <div className="admin-actions">
                     <button onClick={() => onGenerateSummary(paper)} disabled={isBusy || !overview?.ai_configured}>{isBusy ? 'Working…' : 'Generate AI analysis'}</button>
                     <button onClick={() => onUpdateReview(paper)} disabled={isBusy}>Save summary edits</button>
-                    <button className="approve-action" onClick={() => onUpdateReview(paper, 'approved')} disabled={isBusy}>Approve for public site</button>
+                    <button className="approve-action" onClick={() => onUpdateReview(paper, 'approved')} disabled={isBusy}>{overview?.publish_mode === 'auto' ? 'Feature on homepage' : 'Approve for public site'}</button>
                     <button className="reject-action" onClick={() => onUpdateReview(paper, 'rejected')} disabled={isBusy}>Reject</button>
                   </div>
                   <details className="affiliation-editor">

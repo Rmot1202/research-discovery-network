@@ -321,6 +321,44 @@ class ReviewWorkflowTests(unittest.TestCase):
         self.assertEqual(result["papers"][0]["arxiv_id"], "2601.00001")
         self.assertEqual(result["papers"][0]["summary"], "A reviewed plain-language summary.")
 
+    def test_auto_publish_mode_features_approved_first_and_hides_rejected(self):
+        main.update_paper_review("2601.00001", ReviewUpdate(approval_status="approved"), "Bearer test-token")
+        arguments = dict(limit=12, offset=0, q="", category=None, country=None, institution=None, year=None, sort="newest")
+        with patch.object(main, "PUBLISH_MODE", "auto"):
+            result = main.list_featured_papers(**arguments)
+            self.assertEqual(result["publish_mode"], "auto")
+            self.assertEqual([paper["arxiv_id"] for paper in result["papers"]], ["2601.00001", "2601.00002"])
+            main.update_paper_review("2601.00002", ReviewUpdate(approval_status="rejected"), "Bearer test-token")
+            self.assertEqual(main.list_featured_papers(**arguments)["total"], 1)
+
+    def test_daily_update_imports_new_papers_and_remembers_the_run_date(self):
+        from backend import update_papers
+
+        new_paper = {
+            "arxiv_id": "2611.00009", "url": "https://arxiv.org/abs/2611.00009", "title": "A brand new paper",
+            "abstract": "Fresh results.", "authors": ["N New"], "published_at": "2026-11-01T00:00:00Z",
+            "categories": ["cs.DS"], "primary_category": "cs.DS",
+        }
+        calls = []
+
+        def fake_fetch(token, from_date=None):
+            calls.append((token, from_date))
+            return [new_paper], None, 1
+
+        with patch.object(update_papers, "fetch_oai_page", fake_fetch), \
+                patch.object(update_papers.affiliation_scan, "fetch_openalex", return_value={}), \
+                patch("sys.argv", ["update_papers", "--since", "2026-10-31"]), \
+                patch("builtins.print"):
+            update_papers.main()
+        self.assertEqual(calls, [(None, "2026-10-31")])
+        with main.connect_db() as connection:
+            self.assertEqual(
+                connection.execute("SELECT COUNT(*) FROM papers WHERE arxiv_id = '2611.00009'").fetchone()[0], 1
+            )
+        state = update_papers.read_update_state()
+        self.assertEqual(state["last_result"]["new_papers"], 1)
+        self.assertIn("last_run_date", state)
+
     def test_topic_links_are_weighted_by_shared_paper_count(self):
         main.insert_papers([{
             "arxiv_id": "2601.00003",

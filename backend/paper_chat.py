@@ -233,7 +233,7 @@ def collection_stats(connect_db: Callable[[], Any]) -> dict[str, Any]:
         "last_year": years["last_year"],
         "papers_per_topic": {
             f"{code} {CATEGORY_LABELS[code]}": counts.get(code, 0)
-            for code in sorted(CATEGORY_LABELS, key=lambda c: -counts.get(c, 0))
+            for code in sorted(CATEGORY_CODES, key=lambda c: -counts.get(c, 0))
         },
     }
 

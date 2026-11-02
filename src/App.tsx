@@ -51,6 +51,7 @@ export default function App() {
   const [ingestProgress, setIngestProgress] = useState<IngestProgress | null>(null)
   const [isStartingIngest, setIsStartingIngest] = useState(false)
   const [featuredPapers, setFeaturedPapers] = useState<Paper[]>([])
+  const [publishMode, setPublishMode] = useState<'review' | 'auto'>('review')
   const [isAdminOpen, setIsAdminOpen] = useState(false)
   const [adminTokenInput, setAdminTokenInput] = useState('')
   const [adminToken, setAdminToken] = useState('')
@@ -103,8 +104,12 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false
-    void apiRequest<{ papers: Paper[] }>('/api/featured?limit=12')
-      .then((result) => { if (!cancelled) setFeaturedPapers(result.papers) })
+    void apiRequest<{ papers: Paper[]; publish_mode?: 'review' | 'auto' }>('/api/featured?limit=12')
+      .then((result) => {
+        if (cancelled) return
+        setFeaturedPapers(result.papers)
+        setPublishMode(result.publish_mode ?? 'review')
+      })
       .catch((error: unknown) => {
         if (!cancelled) setApiError(error instanceof Error ? error.message : 'Could not load featured papers.')
       })
@@ -542,7 +547,7 @@ export default function App() {
         }}
       />
 
-      <FeaturedPapers papers={featuredPapers} />
+      <FeaturedPapers papers={featuredPapers} publishMode={publishMode} />
 
       <AdminDashboard
         isOpen={isAdminOpen}

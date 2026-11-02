@@ -41,6 +41,14 @@ ARXIV_OAI = "https://oaipmh.arxiv.org/oai"
 OAI = "{http://www.openarchives.org/OAI/2.0/}"
 ARXIV_METADATA = "{http://arxiv.org/OAI/arXiv/}"
 OAI_REQUEST_INTERVAL = 20
+# "review": only editor-approved papers are public (URD spec default).
+# "auto": every paper that isn't rejected is public right away; approving just features it.
+PUBLISH_MODE = "auto" if os.environ.get("PUBLISH_MODE", "review").strip().lower() == "auto" else "review"
+
+
+def public_approval_filter() -> str:
+    return "public" if PUBLISH_MODE == "auto" else "approved"
+
 
 app = FastAPI(title="Research Discovery API", version="0.2.0")
 app.add_middleware(
@@ -135,6 +143,8 @@ def migrate_legacy_json() -> None:
             continue
         categories = raw.get("categories", [])
         primary = next((code for code in categories if code in CATEGORY_CODES), "")
+        if not primary:  # outside the research scope (see backend/taxonomy.py)
+            continue
         rows.append(
             (
                 arxiv_id,
@@ -262,8 +272,12 @@ def parse_feed(feed: bytes) -> tuple[list[dict[str, Any]], str | None, int]:
     return papers, token, total_results
 
 
-def fetch_oai_page(token: str | None) -> tuple[list[dict[str, Any]], str | None, int]:
+def fetch_oai_page(
+    token: str | None, from_date: str | None = None,
+) -> tuple[list[dict[str, Any]], str | None, int]:
     params = {"verb": "ListRecords", "metadataPrefix": "arXiv", "set": "cs"}
+    if from_date:  # incremental harvest: records added or changed on/after this day (YYYY-MM-DD)
+        params["from"] = from_date
     if token:
         params = {"verb": "ListRecords", "resumptionToken": token}
     request = urllib.request.Request(
@@ -272,7 +286,10 @@ def fetch_oai_page(token: str | None) -> tuple[list[dict[str, Any]], str | None,
     )
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
-            return parse_feed(response.read())
+            body = response.read()
+        if from_date and not token and b"noRecordsMatch" in body:
+            return [], None, 0
+        return parse_feed(body)
     except (OSError, ET.ParseError, ValueError) as error:
         raise RuntimeError(f"Could not retrieve arXiv Computer Science metadata: {error}") from error
 
@@ -282,6 +299,8 @@ def insert_papers(papers: list[dict[str, Any]]) -> int:
     with connect_db() as connection:
         for paper in papers:
             category = paper["primary_category"]
+            if not category:  # no category inside the research scope (backend/taxonomy.py)
+                continue
             analysis = {
                 "topic": CATEGORY_LABELS.get(category, category),
                 "cluster_id": None,
@@ -573,15 +592,16 @@ def list_featured_papers(
         country=country,
         institution=institution,
         year=year,
-        sort=sort,
+        sort="featured" if PUBLISH_MODE == "auto" and sort == "newest" else sort,
         limit=limit,
         offset=offset,
-        approval_status="approved",
+        approval_status=public_approval_filter(),
     )
     with connect_db() as connection:
         all_count = connection.execute("SELECT COUNT(*) FROM papers").fetchone()[0]
     return {
         "total": total,
+        "publish_mode": PUBLISH_MODE,
         "limit": limit,
         "offset": offset,
         "papers": [
@@ -683,6 +703,7 @@ def admin_overview(authorization: str | None = Header(default=None)) -> dict[str
         )
     return {
         **dict(counts._mapping),
+        "publish_mode": PUBLISH_MODE,
         "embedded": analyzed,
         "ai_configured": bool(
             os.environ.get("AI_BASE_URL")

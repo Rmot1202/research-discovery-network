@@ -1,0 +1,56 @@
+# Keeps the hosted site up to date with arXiv: imports new Computer Science papers every day
+# and looks up their affiliations on OpenAlex. Writes straight to the hosted database, so the
+# live site shows new papers without a redeploy.
+#
+# Setup (once): GitHub repo → Settings → Secrets and variables → Actions → New repository secret
+#   DATABASE_URL      Render database "External Database URL" (required)
+#   OPENALEX_API_KEY  free key from https://openalex.org/settings/api (optional, bigger daily budget)
+#   OPENALEX_EMAIL    contact email for OpenAlex (optional)
+name: Update papers
+
+on:
+  schedule:
+    - cron: "30 6 * * *"  # daily 06:30 UTC, after arXiv's overnight announcement
+  workflow_dispatch:
+    inputs:
+      since:
+        description: "Import papers added on/after this date (YYYY-MM-DD). Blank = since the last run."
+        required: false
+        default: ""
+
+concurrency:
+  group: update-papers
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r backend/requirements.txt
+      - name: Check the database secret
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::Add the DATABASE_URL repository secret (Render External Database URL) first."
+            exit 1
+          fi
+      - name: Import new papers and affiliations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          OPENALEX_API_KEY: ${{ secrets.OPENALEX_API_KEY }}
+          OPENALEX_EMAIL: ${{ secrets.OPENALEX_EMAIL }}
+          SINCE: ${{ github.event.inputs.since }}
+        run: |
+          if [ -n "$SINCE" ]; then
+            python -m backend.update_papers --since "$SINCE"
+          else
+            python -m backend.update_papers
+          fi

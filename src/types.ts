@@ -59,6 +59,7 @@ export type AdminOverview = {
   documented_countries: number
   embedded: number
   ai_configured: boolean
+  publish_mode?: 'review' | 'auto'
 }
 export type PaperDraft = Pick<Paper, 'summary' | 'key_contribution' | 'application' | 'relevance'>
 export type AffiliationDraft = { institution: string; country: string; source_url: string; evidence: string }
