@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import sys
+import time
 from pathlib import Path
 
 from backend.main import connect_db
@@ -24,6 +26,11 @@ def migrate(source_path: Path = SOURCE) -> dict[str, int]:
         if paper_count == 0:
             raise RuntimeError("The SQLite database contains no papers to migrate.")
 
+        print(
+            f"Copying {paper_count:,} papers (target already has {target_count:,})...",
+            file=sys.stderr, flush=True,
+        )
+        started = time.monotonic()
         for offset in range(0, paper_count, BATCH_SIZE):
             papers = source.execute(
                 """
@@ -44,6 +51,13 @@ def migrate(source_path: Path = SOURCE) -> dict[str, int]:
                     """,
                     [tuple(row) for row in papers],
                 )
+            done = min(offset + BATCH_SIZE, paper_count)
+            elapsed = time.monotonic() - started
+            remaining = elapsed / done * (paper_count - done)
+            print(
+                f"  papers {done:,}/{paper_count:,} ({done / paper_count:.0%}), about {remaining / 60:.0f} min left",
+                file=sys.stderr, flush=True,
+            )
 
         category_count = 0
         categories_exist = source.execute(
@@ -59,6 +73,7 @@ def migrate(source_path: Path = SOURCE) -> dict[str, int]:
                 if not memberships:
                     break
                 category_count += len(memberships)
+                print(f"  topic links {category_count:,}/{assignment_count:,}", file=sys.stderr, flush=True)
                 with connect_db() as target:
                     target.executemany(
                         "INSERT INTO paper_categories (arxiv_id, category) VALUES (?, ?) "
