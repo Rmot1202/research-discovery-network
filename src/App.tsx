@@ -6,7 +6,9 @@ import AdminDashboard from './components/AdminDashboard'
 import ResearchAssistant from './components/ResearchAssistant'
 import ResearchGaps from './components/ResearchGaps'
 import TopicNetwork from './components/TopicNetwork'
+import GuideTour, { shouldAutoOpenGuide } from './components/GuideTour'
 import { findRelatedPapers } from './paperDiscovery'
+import type { MapCommand } from './types'
 import type {
   AdminOverview,
   AffiliationDraft,
@@ -53,6 +55,8 @@ export default function App() {
   const [featuredPapers, setFeaturedPapers] = useState<Paper[]>([])
   const [publishMode, setPublishMode] = useState<'review' | 'auto'>('review')
   const [isAdminOpen, setIsAdminOpen] = useState(false)
+  const [guideOpen, setGuideOpen] = useState(false)
+  const [mapCommand, setMapCommand] = useState<MapCommand | null>(null)
   const [adminTokenInput, setAdminTokenInput] = useState('')
   const [adminToken, setAdminToken] = useState('')
   const [adminOverview, setAdminOverview] = useState<AdminOverview | null>(null)
@@ -419,6 +423,13 @@ export default function App() {
     setSearchQuery('')
   }
 
+  const topicsReady = topics.length > 0
+  useEffect(() => {
+    if (!topicsReady || !shouldAutoOpenGuide()) return
+    const timer = window.setTimeout(() => setGuideOpen(true), 1800)
+    return () => window.clearTimeout(timer)
+  }, [topicsReady])
+
   const progressPercent = ingestProgress?.status === 'complete'
     ? 100
     : ingestProgress?.total_records
@@ -427,6 +438,7 @@ export default function App() {
 
   return (
     <main>
+      <GuideTour open={guideOpen} onClose={() => setGuideOpen(false)} onCommand={setMapCommand} />
       <header className="topbar">
         <button className="brand" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
           <span className="brand-mark" aria-hidden="true"><i /><i /><i /><i /></span>
@@ -440,6 +452,7 @@ export default function App() {
           <a href="#gaps">Gaps</a>
           <a href="#featured">Featured</a>
         </nav>
+        <button className="guide-nav-button" onClick={() => setGuideOpen(true)}>How to use</button>
         <button
           className="admin-nav-button"
           onClick={() => {
@@ -510,6 +523,7 @@ export default function App() {
           apiError={apiError}
           onSelect={selectTopic}
           gapByCode={gapByCode}
+          command={mapCommand}
           onClear={() => {
             setSelectedId('')
             setCategoryFilter('')

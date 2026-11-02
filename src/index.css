@@ -554,3 +554,21 @@ h1 em { color: #209c84; font-style: normal; }
 .map-controls .drill-back { background: #7fe3c7; color: #062026; font-weight: 800; }
 .map-hint b { color: #ffd27a; font-weight: 700; }
 @media (max-width: 760px) { .drill-panel { width: auto; } }
+
+/* "How to use" guided demo */
+.guide-nav-button { padding: 8px 13px; border: 1px solid rgba(127,227,199,.45); border-radius: 999px; background: rgba(127,227,199,.12); color: inherit; font-weight: 700; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.guide-nav-button:hover { background: rgba(127,227,199,.25); }
+.guide-layer { position: fixed; inset: 0; z-index: 1000; }
+.guide-dim { position: absolute; inset: 0; background: rgba(2,12,16,.62); }
+.guide-spotlight { position: fixed; border-radius: 18px; box-shadow: 0 0 0 9999px rgba(2,12,16,.62), 0 0 0 2px #7fe3c7, 0 0 30px rgba(127,227,199,.45); transition: all .35s ease; pointer-events: none; }
+.guide-card { position: fixed; width: 340px; max-width: calc(100vw - 24px); padding: 18px 18px 14px; border: 1px solid rgba(127,227,199,.4); border-radius: 16px; background: #0b2a30; color: #e8f6f3; box-shadow: 0 24px 60px rgba(0,0,0,.45); transition: top .35s ease, left .35s ease; }
+.guide-card h3 { margin: 10px 0 6px; font-family: 'Manrope', sans-serif; font-size: 17px; }
+.guide-card p { margin: 0 0 14px; color: #c4dbd6; font-size: 13.5px; line-height: 1.55; }
+.guide-progress { display: flex; gap: 4px; }
+.guide-progress i { flex: 1; height: 3px; border-radius: 3px; background: rgba(255,255,255,.15); }
+.guide-progress i.on { background: #7fe3c7; }
+.guide-actions { display: flex; align-items: center; gap: 8px; }
+.guide-actions span { margin-right: auto; color: #8fb3ac; font-size: 12px; }
+.guide-actions button { padding: 7px 12px; border: 1px solid rgba(157,216,204,.3); border-radius: 9px; background: transparent; color: #e8f6f3; font-weight: 700; font-size: 12.5px; cursor: pointer; }
+.guide-actions .guide-skip { order: -1; margin-right: 6px; padding: 7px 4px; border: 0; color: #8fb3ac; }
+.guide-actions .guide-next { border-color: #7fe3c7; background: #7fe3c7; color: #062026; }
