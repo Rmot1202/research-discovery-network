@@ -1,0 +1,292 @@
+[
+  {
+    "raw_metadata": {
+      "arxiv_id": "2610.31670",
+      "url": "https://arxiv.org/abs/2610.31670",
+      "title": "Sensorimotor Alignment: A Platonic Proxy for Embodied Policy Success",
+      "abstract": "Robotic foundation models are typically evaluated through costly closed-loop rollouts, which motivates cheap offline proxies for model capability. The Platonic Representation Hypothesis (PRH) suggests that as representations improve, different modalities such as vision and language converge toward a shared statistical model of reality. We ask whether motion trajectories form another such modality: as embodied models become more capable, should their sensory representations converge toward the structure of physical motion? To examine this, we propose Sensorimotor Alignment ($S^2$), a training-free offline metric that measures how well a model's sensory representation aligns with the geometry of physical motion. We find that $S^2$ correlates positively with downstream robot task success across embodied model families, making it a low-cost offline proxy for prioritizing models before closed-loop evaluation. $S^2$ can also identify promising vision-language model (VLM) backbones even before costly fine-tuning into vision-language-action models (VLAs). Beyond this correlation, $S^2$ offers representation-level explanations for phenomena observed in VLAs and world action models (WAMs). With $S^2$, we extend PRH to embodied models and make sensorimotor alignment empirically measurable, offering insight into why an embodied model succeeds beyond its closed-loop success rate.",
+      "authors": [
+        "Yunfei Xie",
+        "Howard H. Qian",
+        "Shiyi Lan",
+        "Kaiyu Hang",
+        "Chen Wei"
+      ],
+      "published_at": "2026-10-22T17:59:51Z",
+      "categories": [
+        "cs.CV",
+        "cs.LG",
+        "cs.RO"
+      ],
+      "affiliation": null,
+      "institution": null,
+      "country": null,
+      "affiliation_source": null
+    },
+    "analysis": {
+      "topic": "Computer Vision",
+      "cluster_id": 3,
+      "representation_score": 87.5,
+      "score_components": {
+        "topic_rarity": 87.5,
+        "institution_visibility": null,
+        "geographic_visibility": null
+      },
+      "summary": null,
+      "approval_status": "pending"
+    }
+  },
+  {
+    "raw_metadata": {
+      "arxiv_id": "2610.31667",
+      "url": "https://arxiv.org/abs/2610.31667",
+      "title": "Direct Pass@$k$ Optimization for Thought Pruning: Balancing Quality and Diversity in Test-Time Reasoning",
+      "abstract": "Test-time scaling has emerged as a key inference strategy for reasoning models, where a model generates a large number of candidate solutions in the hope of finding at least one correct solution. Running all candidate solutions to completion can be computationally demanding, so recent work prunes the candidate pool after generating only a short prefix, committing further computation only to the surviving candidates. Existing pruning strategies divide broadly into two categories: Quality-based methods assign a score to each partial solution and discard those predicted to ultimately lead to an incorrect final solution, while diversity-based methods select partial solutions that follow different reasoning trajectories and are therefore likely to cover different final solutions. The tension between these two objectives is an instance of exploration versus exploitation, yet little to no prior work on pruning exposes this trade-off directly, let alone optimizes it. In this paper, we introduce a pruning procedure that addresses this trade-off directly by optimizing pass@$k$ over the selected solution pool. In particular, it chooses the pool to maximize the probability that at least one of its partial solutions, when continued to completion, yields a correct answer. Because this objective simultaneously rewards high-quality partial solutions and penalizes redundancy among them, quality and diversity are naturally balanced by the criterion itself rather than through separate ad-hoc design choices. On eight open-weight reasoning models, our method outperforms existing quality-based and diversity-based pruning strategies. The gains are particularly pronounced when the pruning procedure keeps a moderate number of partial solutions for continued generation, highlighting the value of directly balancing quality and diversity during pruning.",
+      "authors": [
+        "Mahdi Salmani",
+        "Adel Javanmard",
+        "Devansh Gupta",
+        "Meisam Razaviyayn"
+      ],
+      "published_at": "2026-10-22T17:59:48Z",
+      "categories": [
+        "cs.AI",
+        "cs.CL"
+      ],
+      "affiliation": null,
+      "institution": null,
+      "country": null,
+      "affiliation_source": null
+    },
+    "analysis": {
+      "topic": "Artificial Intelligence",
+      "cluster_id": 4,
+      "representation_score": 87.5,
+      "score_components": {
+        "topic_rarity": 87.5,
+        "institution_visibility": null,
+        "geographic_visibility": null
+      },
+      "summary": null,
+      "approval_status": "pending"
+    }
+  },
+  {
+    "raw_metadata": {
+      "arxiv_id": "2610.31663",
+      "url": "https://arxiv.org/abs/2610.31663",
+      "title": "Phase Transition from Random Features to Fully Trainable Networks",
+      "abstract": "Constructing accurate and computationally tractable approximation spaces is a fundamental task in scientific computing. Partially trainable neural networks bridge fixed random features and fully adaptive representations. This paper quantifies a phase transition pattern in approximation bounds and observes analogous behavior in training errors: a rapid but smooth initial improvement followed by diminishing returns, with a sharper transition under greater initialization mismatch. Under polynomial spectral decay with exponent $α>1$ and leverage compatibility, we establish a squared $L_2$ approximation rate $\\mathcal{O}((κ_P\\log(m/δ)/m)^α)$ for two-layer networks of width $m$ and trainable proportion $P$, where $κ_P=(P/κ_1^*+(1-P)/κ_0^*)^{-1}$. The bound holds uniformly over the unit ball of a reproducing kernel Hilbert space (RKHS) with probability at least $1-δ$. The constants $κ_0^*$ and $κ_1^*$ quantify the fixed and trainable groups' sampling mismatches relative to the target RKHS. For spherical biased-ReLU features in dimension $d$, we verify these assumptions with $α=(d+2)/(d-1)$ and $κ_0^*=4\\sqrt{2}τ(d+1)/d$ for initialization scale $τ\\ge1$, and $κ_1^*=1$ under ridge leverage sampling. For $d=5$ and $τ=10$, a trainable proportion of approximately $4.1\\%$ captures $90\\%$ of the reduction in the approximation bound from $P=0$ to $P=1$. A structured three-layer example illustrates how a few trainable first-layer neurons exploit fixed downstream blocks through nonlinear composition. Numerical experiments across diverse settings, including networks with up to 15 layers, exhibit similar phase transitions in training errors.",
+      "authors": [
+        "Xin He",
+        "Huan Lao",
+        "Xiliang Lu",
+        "Shijun Zhang"
+      ],
+      "published_at": "2026-10-22T17:59:29Z",
+      "categories": [
+        "math.NA",
+        "cs.LG",
+        "math.ST",
+        "stat.ML"
+      ],
+      "affiliation": null,
+      "institution": null,
+      "country": null,
+      "affiliation_source": null
+    },
+    "analysis": {
+      "topic": "Machine Learning",
+      "cluster_id": 0,
+      "representation_score": 87.5,
+      "score_components": {
+        "topic_rarity": 87.5,
+        "institution_visibility": null,
+        "geographic_visibility": null
+      },
+      "summary": null,
+      "approval_status": "pending"
+    }
+  },
+  {
+    "raw_metadata": {
+      "arxiv_id": "2610.31662",
+      "url": "https://arxiv.org/abs/2610.31662",
+      "title": "Reliable AI-Assisted Decisions via Selective Auditing",
+      "abstract": "We consider online monitoring of an AI system that produces a sequence of decisions. At each round, the system outputs a proposed decision together with a confidence score estimating the trustworthiness of the decision. The decision and confidence score need not be produced by the same model: for example, one agent may propose a decision, while a separate verifier agent evaluates it and outputs a correctness or safety score. Based on this information, we must decide whether to accept the AI decision automatically or consult an expert, such as a human auditor, who reviews the proposal and either accepts or corrects it. We formulate this task as an online constrained optimization problem in which the goal is to minimize the frequency of expert auditing while guaranteeing that the fraction of AI errors that go unaudited stays below a user-defined threshold. We derive a family of algorithms with provable error-control guarantees with no assumptions, including a method that is optimally efficient: it asymptotically attains the best achievable auditing rate for both adversarial and i.i.d. data streams. Experiments on screening harmful requests to large language models, qualitative text annotation, and data labeling show that our methods achieve valid error control in practice while substantially reducing the need for human auditing compared to baselines.",
+      "authors": [
+        "Isaac Gibbs",
+        "Elise L. Han",
+        "Ryan J. Tibshirani",
+        "Tijana Zrnic"
+      ],
+      "published_at": "2026-10-22T17:59:22Z",
+      "categories": [
+        "stat.ML",
+        "cs.LG",
+        "stat.ME"
+      ],
+      "affiliation": null,
+      "institution": null,
+      "country": null,
+      "affiliation_source": null
+    },
+    "analysis": {
+      "topic": "Machine Learning",
+      "cluster_id": 6,
+      "representation_score": 87.5,
+      "score_components": {
+        "topic_rarity": 87.5,
+        "institution_visibility": null,
+        "geographic_visibility": null
+      },
+      "summary": null,
+      "approval_status": "pending"
+    }
+  },
+  {
+    "raw_metadata": {
+      "arxiv_id": "2610.31659",
+      "url": "https://arxiv.org/abs/2610.31659",
+      "title": "SpectralCanary: Embarrassingly Simple Low-Frequency Traces for T2I Dataset-Use Auditing",
+      "abstract": "Auditing whether a text-to-image (T2I) model was fine-tuned on a particular image collection is difficult: a model can absorb collection-level visual characteristics without reproducing training images. Proactive dataset-use auditing plants a shared signal in a dataset before release, then later checks whether that signal appears in a suspect model's generated outputs. Existing approaches often trade off verifiability, fidelity, robustness, and deployability. We introduce $\\textbf{SpectralCanary}$, which uses a smooth low-pass mask to blend a fixed canary image into every collection image while leaving captions unchanged and requiring neither auxiliary generation nor per-image optimization. A lightweight verifier detects the transferred signal in suspect-model outputs. Across eight tests on the Pokemon dataset and three realistic data transformations, spanning two architectures families, SpectralCanary achieves the highest average per-generation TPR@$1\\%$ FPR ($91.1\\%$) and fixed threshold model-level accuracy using 30 generations ($94.8\\%$) among the evaluated methods. Across five datasets spanning artistic, medical, satellite, and fashion domains with SD3.5, SpectralCanary averages $92.4\\%$ per-generation TPR@$1\\%$ FPR while preserving the released images (SSIM $0.989$, LPIPS $0.022$) with a near-zero mean change FID (mean $Δ$FID $0.05$) across datasets. Matched-energy ablations on Pokemon and ROCOv2 support our design choice, low-frequency placement transfers more reliably compared to mid/high-frequency placement. Under the evaluated adaptive attacks, the most effective removal requires aggressive modification and incurs more than $25$ $Δ$FID points. These results identify low-frequency visual signals as effective carriers for collection-level T2I audit traces.",
+      "authors": [
+        "Sy-Tuyen Ho",
+        "Anirudh Satheesh",
+        "Soham Chawathe",
+        "Huy Nghiem",
+        "Yongkyun Lee",
+        "Andrew Adams Schoen",
+        "Furong Huang"
+      ],
+      "published_at": "2026-10-22T17:59:03Z",
+      "categories": [
+        "cs.CV",
+        "cs.LG"
+      ],
+      "affiliation": null,
+      "institution": null,
+      "country": null,
+      "affiliation_source": null
+    },
+    "analysis": {
+      "topic": "Computer Vision",
+      "cluster_id": 2,
+      "representation_score": 87.5,
+      "score_components": {
+        "topic_rarity": 87.5,
+        "institution_visibility": null,
+        "geographic_visibility": null
+      },
+      "summary": null,
+      "approval_status": "pending"
+    }
+  },
+  {
+    "raw_metadata": {
+      "arxiv_id": "2610.31657",
+      "url": "https://arxiv.org/abs/2610.31657",
+      "title": "Cost-Aware Abstention for LLM-Based IT Ticket Classification",
+      "abstract": "Wrong automatic routing of an IT support ticket can cost more than human triage. We evaluate cost-aware abstention as an offline, cost-conditional readiness assessment: select a routing policy on calibration data under explicit costs, then evaluate that frozen policy once on held-out test data. On a public 47,837-ticket, eight-class corpus, we compare four trained non-LLM classifiers with four large language models under zero- and few-shot prompting. Under the illustrative cost model (c_ok, c_triage, c_wrong) = (0, 1, 5), TF-IDF with logistic regression and a threshold of 0.60 selected on calibration reduces test cost from 0.763 to 0.472, a 38.1% relative reduction (paired ratio-bootstrap 95% CI [35.7%, 40.4%]), while lowering wrong routes from 15.3% to 3.5%. Frozen calibration-selected policies also beat both always-route and always-defer on held-out test data in 14 of 16 settings in a post-hoc cost-parameter analysis. The strongest prompted configuration reaches 0.477 accuracy on a stratified 1,000-ticket test subset, versus 0.879 for fine-tuned DistilBERT on the same tickets. Isotonic lowers expected calibration error without reliably improving discrimination: GPT-4o-mini few-shot has one confidence value before and after recalibration and correctness AUROC 0.500. We therefore report correctness AUROC and tie-aware risk-coverage area alongside ECE. At the analytically derived break-even probability 0.80, seven prompted configurations defer all tickets; Haiku few-shot routes only 19/1,000. An LLM-only agreement control and margin/entropy rejection baselines further separate calibration from discrimination. The findings are scoped to this dataset, prompt design, model endpoints, and illustrative costs; the work is an evaluation framework, not a new abstention algorithm or universal deployment certification.",
+      "authors": [
+        "Sachin Gupta"
+      ],
+      "published_at": "2026-10-22T17:58:52Z",
+      "categories": [
+        "cs.LG",
+        "cs.AI",
+        "cs.CL"
+      ],
+      "affiliation": null,
+      "institution": null,
+      "country": null,
+      "affiliation_source": null
+    },
+    "analysis": {
+      "topic": "Machine Learning",
+      "cluster_id": 5,
+      "representation_score": 87.5,
+      "score_components": {
+        "topic_rarity": 87.5,
+        "institution_visibility": null,
+        "geographic_visibility": null
+      },
+      "summary": null,
+      "approval_status": "pending"
+    }
+  },
+  {
+    "raw_metadata": {
+      "arxiv_id": "2610.31656",
+      "url": "https://arxiv.org/abs/2610.31656",
+      "title": "METTA: Memory-Enhanced Test-Time Adaptation for Meta-Reinforcement Learning",
+      "abstract": "Meta-reinforcement learning aims to train agents that adapt quickly to unseen tasks from limited interaction, but this requires representing task evidence over long interaction histories. Classical recurrent agents compress experience into hidden states, while transformer-based agents retrieve from past trajectories at quadratic memory and computation cost. In this work, we propose Memory-Enhanced Test-Time Adaptation (METTA) for meta-reinforcement learning. It decomposes the fast adaptation phase into two temporal scales: a causal neural memory performs fine-grained within-episode adaptation with linear sequence complexity, while compact episode-level summaries support long-range cross-episode task inference without attending over the full interaction history. Moreover, equipping agents with neural memory provides sufficient expressive capacity and test-time training capability, enabling effective adaptation to unseen held-out tasks and task families at meta-test time. On unseen held-out Meta-World ML10/45 test environments, METTA achieves a success rate over $50\\%$ while maintaining a low training budget and short wall-clock time. On long-context sparse-reward PointMaze tasks, it outperforms transformer-based baselines by exhibiting more structured exploration behavior. These results show that METTA provides an efficient path toward more adaptive and scalable long-context meta-RL.",
+      "authors": [
+        "Ali Najar",
+        "Hosein Hasani",
+        "Amir Kooshan Fattah",
+        "Yasamin Rajabi",
+        "Mahdieh Soleymani Baghshah"
+      ],
+      "published_at": "2026-10-22T17:58:27Z",
+      "categories": [
+        "cs.LG",
+        "cs.AI"
+      ],
+      "affiliation": null,
+      "institution": null,
+      "country": null,
+      "affiliation_source": null
+    },
+    "analysis": {
+      "topic": "Machine Learning",
+      "cluster_id": 1,
+      "representation_score": 87.5,
+      "score_components": {
+        "topic_rarity": 87.5,
+        "institution_visibility": null,
+        "geographic_visibility": null
+      },
+      "summary": null,
+      "approval_status": "pending"
+    }
+  },
+  {
+    "raw_metadata": {
+      "arxiv_id": "2610.31650",
+      "url": "https://arxiv.org/abs/2610.31650",
+      "title": "EpiSEM-Bench: Evaluating Safety and Evidence Recovery in LLM Agents under Missing Evidence",
+      "abstract": "Tool-using language model agents rely on environmental facts to decide whether an action is permitted. When a tool response omits a safety-relevant fact, an agent may carry out a prohibited action even though the user request is benign and every returned statement is true. We introduce \\bench{}, an executable benchmark for evaluating unsafe execution, safety boundaries, and evidence recovery in LLM agents under missing evidence. It contains 300 matched unsafe/safe task pairs across six domains. By systematically suppressing critical facts, the benchmark measures unsafe execution under critical evidence omission and determines the minimum observed failure cardinality, including failures with full evidence and cases with no observed failure after exhaustive testing. An independent audit tool tests whether agents seek missing facts and then withhold prohibited actions while completing permissible tasks. The benchmark reveals substantial variation across the ten models in omission robustness, evidence acquisition, and appropriate action. Resistance to missing evidence does not necessarily translate into useful recovery. Recovery access reduces unsafe execution for all ten models, but agents differ in whether they actively obtain the missing facts and use them to act appropriately in both worlds.",
+      "authors": [
+        "Qijin Zhang",
+        "Hanzhen Wang",
+        "Yuehan Zhao",
+        "Haoyu Dai",
+        "Yao Shu",
+        "Zhongxiang Dai",
+        "Shuang Qiu"
+      ],
+      "published_at": "2026-10-22T17:57:04Z",
+      "categories": [
+        "cs.AI",
+        "cs.LG"
+      ],
+      "affiliation": null,
+      "institution": null,
+      "country": null,
+      "affiliation_source": null
+    },
+    "analysis": {
+      "topic": "Artificial Intelligence",
+      "cluster_id": 7,
+      "representation_score": 87.5,
+      "score_components": {
+        "topic_rarity": 87.5,
+        "institution_visibility": null,
+        "geographic_visibility": null
+      },
+      "summary": null,
+      "approval_status": "pending"
+    }
+  }
+]

@@ -1,0 +1,128 @@
+{
+  "planHash": "2ececa76f4ac223d45a1f94e9840566fdb2593cc5c89880f1e7a598885a7fb5a",
+  "phase": "standalone",
+  "recordedAtUtc": "2026-10-26T04:26:06.0209770Z",
+  "retryCount": 1,
+  "resetBaseline": false,
+  "complete": true,
+  "result": {
+    "setupSucceeded": true,
+    "setupDurationMs": 0,
+    "setupFailureOutput": null,
+    "assertions": [
+      {
+        "name": "typescript-no-emit",
+        "kind": "process",
+        "verificationMethod": "exit-code",
+        "passed": true,
+        "timedOut": false,
+        "skipped": false,
+        "skippedReason": null,
+        "exitCode": 0,
+        "outputSample": "",
+        "durationMs": 3218
+      },
+      {
+        "name": "production-build",
+        "kind": "process",
+        "verificationMethod": "exit-code",
+        "passed": true,
+        "timedOut": false,
+        "skipped": false,
+        "skippedReason": null,
+        "exitCode": 0,
+        "outputSample": "You are using Node.js 22.11.0. Vite requires Node.js version 20.19\u002B or 22.12\u002B. Please upgrade your Node.js version.\nvite v8.0.5 building client environment for production...\n\u001B[2K\ntransforming...\u2713 22 modules transformed.\nrendering chunks...\ncomputing gzip size...\ndist/robots.txt                   0.02 kB \u2502 gzip:  0.04 kB\ndist/index.html                   0.93 kB \u2502 gzip:  0.42 kB\ndist/assets/index-DkyqZoEt.css   32.82 kB \u2502 gzip:  8.31 kB\ndist/assets/index-C1jnZ2yg.js   226.73 kB \u2502 gzip: 70.59 kB\n\n\u2713 built in 360ms\n",
+        "durationMs": 1030
+      },
+      {
+        "name": "tests-pass",
+        "kind": "process",
+        "verificationMethod": "test-results",
+        "passed": true,
+        "timedOut": false,
+        "skipped": false,
+        "skippedReason": null,
+        "exitCode": 0,
+        "outputSample": ".............\n----------------------------------------------------------------------\nRan 13 tests in 0.134s\n\nOK\n",
+        "durationMs": 1398,
+        "testResults": {
+          "testFramework": "unknown",
+          "runnerDetectedFrom": "none",
+          "testsTotal": 0,
+          "testsPassed": 0,
+          "testsFailed": 0,
+          "testsSkipped": 0,
+          "parseFailed": true
+        }
+      },
+      {
+        "name": "home-page-serves",
+        "kind": "http-probe",
+        "verificationMethod": "http-status",
+        "passed": true,
+        "timedOut": false,
+        "skipped": false,
+        "skippedReason": null,
+        "exitCode": null,
+        "outputSample": "HTTP 200\n\u003C!doctype html\u003E\n\u003Chtml lang=\u0022en\u0022\u003E\n  \u003Chead\u003E\n    \u003Cscript type=\u0022module\u0022\u003Eimport { injectIntoGlobalHook } from \u0022/@react-refresh\u0022;\ninjectIntoGlobalHook(window);\nwindow.$RefreshReg$ = () =\u003E {};\nwindow.$RefreshSig$ = () =\u003E (type) =\u003E type;\u003C/script\u003E\n\n    \u003Cscript type=\u0022module\u0022 src=\u0022/@vite/client\u0022\u003E\u003C/script\u003E\n\n    \n    \u003Cmeta charset=\u0022UTF-8\u0022 /\u003E\n    \u003Cmeta name=\u0022viewport\u0022 content=\u0022width=device-width, initial-scale=1.0\u0022 /\u003E\n    \u003Ctitle\u003EFigma Make App\u003C/title\u003E\n    \n    \u003Cmeta name=\u0022description\u0022 content=\u0022Explore an interactive map of research topics, subtopics, and connections to uncover underrepresented areas and discover relevant papers.\u0022\u003E\n    \u003Cmeta name=\u0022robots\u0022 content=\u0022noindex, nofollow\u0022\u003E\n    \u003Clink rel=\u0022icon\u0022 href=\u0022/favicon.svg\u0022\u003E\n    \u003Cmeta property=\u0022og:title\u0022 content=\u0022Figma Make App\u0022\u003E\n    \u003Cmeta property=\u0022og:description\u0022 content=\u0022Explore an interactive map of research topics, subtopics, and connections to uncover underrepresented areas and discover relevant papers.\u0022\u003E\n  \u003C/head\u003E\n  \u003Cbody\u003E\n    \n    \u003Cdiv id=\u0022root\u0022\u003E\u003C/div\u003E\n    \u003Cscript type=\u0022module\u0022 src=\u0022/src/main.tsx\u0022\u003E\u003C/script\u003E\n    \n  \u003C/body\u003E\n\u003C/html\u003E\n\n--- server output ---\nYou are using Node.js 22.11.0. Vite requires Node.js version 20.19\u002B or 22.12\u002B. Please upgrade your Node.js version.\n\n  VITE v8.0.5  ready in 477 ms\n\n  \u279C  Local:   http://127.0.0.1:5174/\n",
+        "durationMs": 827
+      }
+    ],
+    "executions": [
+      {
+        "source": "typescript-no-emit",
+        "resolvedExecutable": "/usr/local/bin/node",
+        "args": [
+          "node_modules/typescript/bin/tsc",
+          "--noEmit"
+        ],
+        "cwd": "/Users/RavenMott1/Desktop/Research Discovery Network Homepage",
+        "env": {},
+        "prependPath": [],
+        "platform": "darwin"
+      },
+      {
+        "source": "production-build",
+        "resolvedExecutable": "/usr/local/bin/node",
+        "args": [
+          "node_modules/vite/bin/vite.js",
+          "build"
+        ],
+        "cwd": "/Users/RavenMott1/Desktop/Research Discovery Network Homepage",
+        "env": {},
+        "prependPath": [],
+        "platform": "darwin"
+      },
+      {
+        "source": "tests-pass",
+        "resolvedExecutable": "/Users/RavenMott1/Desktop/Research Discovery Network Homepage/.venv/bin/python",
+        "args": [
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "tests"
+        ],
+        "cwd": "/Users/RavenMott1/Desktop/Research Discovery Network Homepage",
+        "env": {},
+        "prependPath": [],
+        "platform": "darwin"
+      },
+      {
+        "source": "home-page-serves",
+        "resolvedExecutable": "/usr/local/bin/node",
+        "args": [
+          "node_modules/vite/bin/vite.js",
+          "--host",
+          "127.0.0.1",
+          "--port",
+          "5174"
+        ],
+        "cwd": "/Users/RavenMott1/Desktop/Research Discovery Network Homepage",
+        "env": {},
+        "prependPath": [],
+        "platform": "darwin"
+      }
+    ]
+  }
+}

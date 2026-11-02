@@ -1,0 +1,13 @@
+node_modules
+.venv
+dist
+.env
+.env.*
+!.env.example
+backend/data/*.sqlite3*
+backup-*
+**/__pycache__
+.git
+notebooks
+._*
+.DS_Store

@@ -1,0 +1,9 @@
+torch>=2.2,<3
+transformers>=4.45,<5
+scikit-learn>=1.5,<2
+scipy>=1.13,<1.16
+pandas>=2,<3
+numpy>=1.26,<2
+nbformat>=5.10,<6
+nbclient>=0.10,<1
+ipykernel>=6,<7

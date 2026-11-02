@@ -1,0 +1,31 @@
+# Render Blueprint: Dashboard -> New -> Blueprint -> pick this repo.
+# Creates the web app (API + website in one Docker service) and a PostgreSQL database.
+services:
+  - type: web
+    name: research-discovery-network
+    runtime: docker
+    plan: free            # free instances sleep after 15 min idle; "starter" stays awake
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: research-discovery-db
+          property: connectionString
+      - key: ADMIN_API_TOKEN
+        generateValue: true   # copy it from the service's Environment tab to log in to Admin review
+      - key: AI_BASE_URL
+        sync: false           # optional: any OpenAI-compatible provider for the assistant
+      - key: AI_API_KEY
+        sync: false
+      - key: AI_CHAT_MODEL
+        sync: false
+      - key: AI_EMBEDDING_MODEL
+        sync: false
+      - key: OPENALEX_API_KEY
+        sync: false           # optional: larger daily budget for the paper scan
+
+databases:
+  - name: research-discovery-db
+    plan: free              # free Render Postgres expires after 30 days; basic-256mb keeps it
+    databaseName: research_discovery
+    user: research

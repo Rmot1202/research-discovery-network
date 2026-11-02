@@ -1,0 +1,10 @@
+{
+  "description": "Explore an interactive map of research topics, subtopics, and connections to uncover underrepresented areas and discover relevant papers.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
