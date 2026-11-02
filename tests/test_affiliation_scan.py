@@ -114,5 +114,44 @@ class AffiliationScanTests(unittest.TestCase):
         self.assertEqual(state["found"], 1)
 
 
+class OldStyleIdTests(unittest.TestCase):
+    def test_pre_2007_ids_get_their_archive_back(self):
+        from backend.arxiv_utils import abs_url, arxiv_path, pdf_url
+
+        self.assertEqual(arxiv_path("0002216", ["cs.LG"]), "cs/0002216")
+        self.assertEqual(arxiv_path("0002216", ["math.CO", "cs.DM"]), "math/0002216")
+        self.assertEqual(arxiv_path("0002216", None, "cs.AI"), "cs/0002216")
+        self.assertEqual(arxiv_path("2601.00001", ["cs.LG"]), "2601.00001")
+        self.assertEqual(pdf_url("0002216", ["quant-ph", "cs.ET"]), "https://arxiv.org/pdf/quant-ph/0002216")
+        self.assertEqual(abs_url("2601.00001"), "https://arxiv.org/abs/2601.00001")
+
+    def test_scan_goes_newest_first_and_uses_fixed_pdf_paths(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        engine = create_database_engine(f"sqlite:///{Path(tmp.name) / 'o.sqlite3'}")
+        self.addCleanup(engine.dispose)
+        with engine.begin() as connection:
+            connection.execute(text(
+                "CREATE TABLE papers (arxiv_id TEXT PRIMARY KEY, analysis TEXT NOT NULL, title TEXT, institution TEXT, "
+                "country TEXT, primary_category TEXT, raw_metadata TEXT)"
+            ))
+            for arxiv_id, categories in [("0002216", ["math.CO", "cs.DM"]), ("2601.00001", ["cs.LG"]), ("2610.00001", ["cs.CV"])]:
+                connection.execute(
+                    text("INSERT INTO papers VALUES (:id, '{}', 't', NULL, NULL, :p, :r)"),
+                    {"id": arxiv_id, "p": categories[-1], "r": json.dumps({"categories": categories})},
+                )
+        # a saved state from the old oldest-first scan
+        affiliation_scan._ensure_tables(engine)
+        affiliation_scan.write_state(engine, {**affiliation_scan.default_state(), "order": None, "cursor": "0002216", "checked": 50})
+        seen = []
+        with mock.patch.dict("os.environ", {"AFFILIATION_SOURCES": ""}), \
+                mock.patch.object(affiliation_scan, "pdf_first_page_text", side_effect=lambda path: seen.append(path) or PDF_TEXT), \
+                mock.patch.object(affiliation_scan.time, "sleep"):
+            state = affiliation_scan.run_scan(engine)
+        self.assertEqual(seen, ["2610.00001", "2601.00001", "math/0002216"])
+        self.assertEqual(state["checked"], 3)  # restarted cleanly, old cursor dropped
+        self.assertEqual(state["status"], "complete")
+
+
 if __name__ == "__main__":
     unittest.main()

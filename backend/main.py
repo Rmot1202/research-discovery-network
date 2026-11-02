@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.ai_service import (
     extract_pdf_affiliations, generate_embeddings, generate_research_analysis,
 )
-from backend.arxiv_utils import normalize_arxiv_id
+from backend.arxiv_utils import abs_url, normalize_arxiv_id
 from backend.database import create_database_engine, database_connection
 from backend.paper_queries import (
     get_filter_options as query_filter_options,
@@ -257,7 +257,7 @@ def parse_feed(feed: bytes) -> tuple[list[dict[str, Any]], str | None, int]:
         papers.append(
             {
                 "arxiv_id": arxiv_id,
-                "url": f"https://arxiv.org/abs/{arxiv_id}",
+                "url": abs_url(arxiv_id, categories, primary_category),
                 "title": title,
                 "abstract": abstract,
                 "authors": authors,

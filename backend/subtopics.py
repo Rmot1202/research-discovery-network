@@ -15,6 +15,7 @@ from typing import Any
 
 import numpy as np
 
+from backend.arxiv_utils import abs_url
 from backend.taxonomy import CATEGORY_CODES, CATEGORY_LABELS
 
 FALLBACK_SAMPLE = 1500
@@ -46,7 +47,7 @@ def _paper_card(row: Any) -> dict[str, Any]:
         "published_at": row["published_at"],
         "institution": row["institution"],
         "country": row["country"],
-        "url": f"https://arxiv.org/abs/{row['arxiv_id']}",
+        "url": abs_url(row["arxiv_id"]),
         "summary": analysis.get("summary"),
         "key_contribution": analysis.get("key_contribution"),
         "relevance": analysis.get("relevance"),

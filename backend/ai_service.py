@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from backend.arxiv_utils import normalize_arxiv_id
+from backend.arxiv_utils import arxiv_path, normalize_arxiv_id
 
 
 def ai_endpoint(resource: str) -> tuple[str, dict[str, str]]:
@@ -132,7 +132,7 @@ def extract_pdf_affiliations(arxiv_id: str, title: str) -> dict[str, Any]:
         import pymupdf
     except ImportError as error:
         raise HTTPException(status_code=503, detail="Install the PDF extraction dependency to inspect paper affiliations.") from error
-    safe_id = normalize_arxiv_id(arxiv_id)
+    safe_id = arxiv_path(normalize_arxiv_id(arxiv_id))  # restores cs/ for pre-2007 IDs
     if not re.fullmatch(r"(?:\d{4}\.\d{4,5}|[a-z-]+(?:\.[A-Z]{2})?/\d{7})", safe_id):
         raise HTTPException(status_code=422, detail="This arXiv identifier cannot be used to retrieve a PDF.")
     pdf_url = f"https://arxiv.org/pdf/{safe_id}"

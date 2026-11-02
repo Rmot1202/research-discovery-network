@@ -22,6 +22,7 @@ from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from backend.arxiv_utils import abs_url
 from backend.ai_service import ai_request, generate_embeddings
 from backend.taxonomy import CATEGORY_CODES, CATEGORY_LABELS
 
@@ -209,7 +210,7 @@ def retrieve_papers(
             "published_at": candidate["published_at"],
             "primary_category": candidate["primary_category"],
             "topic": CATEGORY_LABELS.get(candidate["primary_category"], candidate["primary_category"]),
-            "url": raw.get("url") or f"https://arxiv.org/abs/{candidate['arxiv_id']}",
+            "url": abs_url(candidate["arxiv_id"], raw.get("categories"), candidate["primary_category"]),
             "summary": analysis.get("summary"),
             "relevance": round(float(candidate["relevance"] or 0), 4),
         })

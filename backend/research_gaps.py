@@ -49,6 +49,7 @@ from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from backend.arxiv_utils import abs_url
 from backend.paper_chat import ensure_search_index, extract_keywords
 from backend.taxonomy import CATEGORIES, CATEGORY_CODES, CATEGORY_LABELS
 
@@ -357,7 +358,7 @@ def idea_gap_report(engine: Engine, query: str, category: str | None = None) -> 
                         "title": row["title"],
                         "year": (row["published_at"] or "")[:4],
                         "topic": CATEGORY_LABELS.get(row["primary_category"], row["primary_category"]),
-                        "url": f"https://arxiv.org/abs/{row['arxiv_id']}",
+                        "url": abs_url(row["arxiv_id"], None, row["primary_category"]),
                     })
     topics = topic_gap_report(engine)["topics"]
     indices = sorted(topic["index"] for topic in topics if topic["metrics"]["papers"] > 0)

@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from backend.arxiv_utils import abs_url, pdf_url
 from backend.discovery_score import DiscoveryIndex, ranked_ids, score_paper
 from backend.taxonomy import CATEGORIES, CATEGORY_CODES, CATEGORY_LABELS
 
@@ -131,6 +132,8 @@ def serialize_paper(
     return {
         **raw,
         **analysis,
+        "url": abs_url(row["arxiv_id"], raw.get("categories"), row["primary_category"]),
+        "pdf_url": pdf_url(row["arxiv_id"], raw.get("categories"), row["primary_category"]),
         "institution": row["institution"],
         "country": row["country"],
         "topic": CATEGORY_LABELS.get(row["primary_category"], row["primary_category"]),

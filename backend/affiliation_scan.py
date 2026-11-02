@@ -43,8 +43,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.engine import Engine
+
+from backend.arxiv_utils import arxiv_path
 
 OPENALEX_URL = "https://api.openalex.org/works"
 OPENALEX_BATCH = 50
@@ -93,7 +95,7 @@ def default_state() -> dict[str, Any]:
     return {
         "status": "not_started", "cursor": "", "checked": 0, "found": 0, "found_openalex": 0,
         "found_pdf": 0, "remaining": None, "pdf_fallback": False, "error": None,
-        "started_at": None, "updated_at": None, "last_found": [],
+        "started_at": None, "updated_at": None, "last_found": [], "order": SCAN_ORDER,
     }
 
 
@@ -217,10 +219,11 @@ def affiliations_from_openalex(work: dict[str, Any]) -> list[dict[str, Any]]:
     return results
 
 
-def pdf_first_page_text(arxiv_id: str) -> str:
+def pdf_first_page_text(arxiv_path: str) -> str:
+    """arxiv_path is what arXiv's URLs need: 2601.00001, or cs/0002216 for old papers."""
     import pymupdf  # PyMuPDF is already a backend dependency
 
-    request = urllib.request.Request(f"https://arxiv.org/pdf/{arxiv_id}", headers={"User-Agent": USER_AGENT})
+    request = urllib.request.Request(f"https://arxiv.org/pdf/{arxiv_path}", headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(request, timeout=45) as response:
         pdf_bytes = response.read(20_000_001)
     if len(pdf_bytes) > 20_000_000:
@@ -315,12 +318,53 @@ def save_affiliations(engine: Engine, arxiv_id: str, affiliations: list[dict[str
 
 # ----------------------------------------------------------------------------- scan loop
 
+SCAN_ORDER = "newest_first"
+
+
 def _next_batch(engine: Engine, cursor: str, size: int) -> list[str]:
+    """Newest papers first: new-style IDs (YYMM.NNNNN) sort above old-style ones, and the
+    newest papers are the ones most likely to have readable affiliations."""
+    query = "SELECT arxiv_id FROM papers WHERE institution IS NULL"
+    params: dict[str, Any] = {"n": size}
+    if cursor:
+        query += " AND arxiv_id < :c"
+        params["c"] = cursor
     with engine.connect() as connection:
-        return [row[0] for row in connection.execute(
-            text("SELECT arxiv_id FROM papers WHERE institution IS NULL AND arxiv_id > :c ORDER BY arxiv_id LIMIT :n"),
-            {"c": cursor, "n": size},
-        ).all()]
+        return [row[0] for row in connection.execute(text(query + " ORDER BY arxiv_id DESC LIMIT :n"), params).all()]
+
+
+def _remaining(engine: Engine, cursor: str) -> int:
+    query = "SELECT COUNT(*) FROM papers WHERE institution IS NULL"
+    params: dict[str, Any] = {}
+    if cursor:
+        query += " AND arxiv_id < :c"
+        params["c"] = cursor
+    with engine.connect() as connection:
+        return connection.execute(text(query), params).scalar_one()
+
+
+def paper_paths(engine: Engine, arxiv_ids: list[str]) -> dict[str, str]:
+    """arXiv URL paths for these papers (restores cs/ etc. for pre-2007 IDs)."""
+    if not arxiv_ids:
+        return {}
+    try:
+        with engine.connect() as connection:
+            rows = connection.execute(
+                text("SELECT arxiv_id, primary_category, raw_metadata FROM papers WHERE arxiv_id IN :ids").bindparams(
+                    bindparam("ids", expanding=True)
+                ),
+                {"ids": list(arxiv_ids)},
+            ).all()
+    except Exception:  # minimal tables without these columns: fall back to the cs archive
+        rows = []
+    paths = {}
+    for arxiv_id, primary, raw in rows:
+        try:
+            categories = json.loads(raw or "{}").get("categories") or None
+        except (TypeError, ValueError):
+            categories = None
+        paths[arxiv_id] = arxiv_path(arxiv_id, categories, primary)
+    return {arxiv_id: paths.get(arxiv_id, arxiv_path(arxiv_id)) for arxiv_id in arxiv_ids}
 
 
 def run_scan(
@@ -338,6 +382,9 @@ def run_scan(
     if not use_openalex:
         pdf_fallback = True  # the PDF is the only source left
     state = read_state(engine)
+    if state.get("order") != SCAN_ORDER:
+        # older versions scanned oldest-first with broken pre-2007 PDF links; start over newest-first
+        state.update(default_state())
     if state["status"] == "complete":
         state.update(default_state())  # start a fresh pass; already-documented papers are skipped anyway
     state.update({"status": "running", "error": None, "pdf_fallback": pdf_fallback, "openalex_exhausted": False,
@@ -361,6 +408,7 @@ def run_scan(
                 state["openalex_exhausted"] = True  # keep going with PDFs only for this run
                 state["error"] = str(error)
                 works = {}
+            paths = paper_paths(engine, batch) if pdf_fallback else {}
             for arxiv_id in batch:
                 if stop.is_set():
                     break
@@ -373,9 +421,10 @@ def run_scan(
                         state["found_openalex"] += 1
                 if not found and pdf_fallback:
                     try:
-                        page = pdf_first_page_text(arxiv_id)
+                        path = paths.get(arxiv_id, arxiv_id)
+                        page = pdf_first_page_text(path)
                         found = save_affiliations(engine, arxiv_id, affiliations_from_text(page), "pdf_text",
-                                                  f"https://arxiv.org/pdf/{arxiv_id}")
+                                                  f"https://arxiv.org/pdf/{path}")
                         if found:
                             state["found_pdf"] += 1
                     except Exception as error:  # one bad PDF must not stop the scan
@@ -397,10 +446,7 @@ def run_scan(
     except Exception as error:
         state["status"] = "error"
         state["error"] = str(error)[:500]
-    with engine.connect() as connection:
-        state["remaining"] = connection.execute(
-            text("SELECT COUNT(*) FROM papers WHERE institution IS NULL AND arxiv_id > :c"), {"c": state["cursor"]}
-        ).scalar_one()
+    state["remaining"] = _remaining(engine, state["cursor"])
     write_state(engine, state)
     _invalidate_gap_cache()
     return state
@@ -415,13 +461,15 @@ def scan_pdfs_for(engine: Engine, arxiv_ids: list[str], log: Callable[[str], Non
         ))
         done = {row[0] for row in connection.execute(text("SELECT arxiv_id FROM affiliation_pdf_checked")).all()}
     checked = found = 0
+    paths = paper_paths(engine, [arxiv_id for arxiv_id in arxiv_ids if arxiv_id not in done])
     for arxiv_id in arxiv_ids:
         if arxiv_id in done:
             continue
         try:
-            page = pdf_first_page_text(arxiv_id)
+            path = paths.get(arxiv_id, arxiv_id)
+            page = pdf_first_page_text(path)
             if save_affiliations(engine, arxiv_id, affiliations_from_text(page), "pdf_text",
-                                 f"https://arxiv.org/pdf/{arxiv_id}"):
+                                 f"https://arxiv.org/pdf/{path}"):
                 found += 1
         except Exception as error:  # one bad PDF must not stop the run
             if log:
@@ -497,7 +545,8 @@ def main() -> None:
 
     def report(state: dict[str, Any]) -> None:
         print(f"checked {state['checked']:,} · found {state['found']:,} "
-              f"(OpenAlex {state['found_openalex']:,}, PDF {state['found_pdf']:,}) · cursor {state['cursor']}", flush=True)
+              f"(OpenAlex {state['found_openalex']:,}, PDF {state['found_pdf']:,}) · cursor {state['cursor']}"
+              + (f" · last problem: {state['error'][:120]}" if state.get("error") else ""), flush=True)
 
     try:
         final = run_scan(engine, args.limit, args.pdf, report)
