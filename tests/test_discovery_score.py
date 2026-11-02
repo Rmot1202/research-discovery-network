@@ -100,12 +100,21 @@ class IndexTests(unittest.TestCase):
         factors = index.factors("cs.RO", None, "Peru", None)
         self.assertIsNone(factors["institution"])
         self.assertIsNone(factors["geography"])  # only 4 documented papers, under the minimum
+        result = ds.combine(factors)
+        self.assertEqual(result["missing"]["institution"], "not_documented")
+        self.assertEqual(result["missing"]["geography"], "small_field")
 
     def test_ranking_puts_highest_score_first(self):
         index = ds.DiscoveryIndex(rows([(30, "cs.CV", "Big U", "United States", 0), (1, "cs.CV", "Small U", "Ghana", 1)]))
         ranked = ds.ranked_ids(index)
         self.assertEqual(ranked[0][0], "id30")
         self.assertGreater(ranked[0][1]["discovery_score"], ranked[-1][1]["discovery_score"])
+
+
+    def test_missing_factors_do_not_win_the_ranking(self):
+        topic_only = ds.combine({"topic": 100, "institution": None, "geography": None})
+        all_three = ds.combine({"topic": 80, "institution": 80, "geography": 80})
+        self.assertGreater(ds.ranking_value(all_three), ds.ranking_value(topic_only))  # 80 vs 70
 
 
 class DatabaseTests(unittest.TestCase):

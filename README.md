@@ -477,6 +477,9 @@ Discovery Score = Σ(weight × factor) / Σ(weights of the factors that are avai
 ```
 
 `coverage` reports how much of the full weight was available (1.0 = all three).
+For sorting only, a missing factor counts as a neutral 50, so a paper is not
+pushed to the top just because its institution or country is unknown (the
+displayed score is unchanged).
 
 **One strong factor is enough.** A paper is flagged as underrepresented when
 the Discovery Score is ≥ 60 (`DISCOVERY_OVERALL_THRESHOLD`) **or** any single

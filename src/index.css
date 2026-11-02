@@ -586,9 +586,9 @@ h1 em { color: #209c84; font-style: normal; }
 .discovery-reasons { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .discovery-reasons li { padding: 4px 9px; border-radius: 12px; background: #fdeee4; color: #a4471b; font-size: 11px; }
 .discovery-factors { display: grid; gap: 8px; margin-top: 12px; }
-.discovery-factors > div { display: grid; grid-template-columns: minmax(120px, 160px) 1fr 104px; gap: 10px; align-items: center; font-size: 12px; color: #34595b; }
+.discovery-factors > div { display: grid; grid-template-columns: minmax(120px, 160px) 1fr minmax(104px, max-content); gap: 10px; align-items: center; font-size: 12px; color: #34595b; }
 .discovery-factors > div small { color: #8a9c9e; }
-.discovery-factors > div b { text-align: right; font-weight: 600; }
+.discovery-factors > div b { text-align: right; font-weight: 600; white-space: nowrap; }
 .discovery-factors > div.missing b { color: #9aaaaa; font-weight: 400; }
 .discovery-note { margin: 10px 0 0; color: #7c8f91; font-size: 11px; line-height: 1.5; }
-@media (max-width: 560px) { .discovery-factors > div { grid-template-columns: 1fr 72px; } .discovery-factors > div .gap-bar { grid-column: 1 / -1; grid-row: 2; } }
+@media (max-width: 560px) { .discovery-factors > div { grid-template-columns: 1fr auto; gap: 4px 10px; } .discovery-factors > div .gap-bar { grid-column: 1 / -1; grid-row: 2; } }

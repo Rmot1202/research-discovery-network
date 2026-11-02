@@ -34,6 +34,7 @@ export type Discovery = {
   discovery_score: number | null
   factors: { topic: number | null; institution: number | null; geography: number | null }
   topic_basis: 'subtopic' | 'category' | null
+  missing?: Partial<Record<'topic' | 'institution' | 'geography', 'not_documented' | 'small_field'>>
   weights: { topic: number; institution: number; geography: number }
   coverage: number
   flags: ('topic' | 'institution' | 'geography')[]

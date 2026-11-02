@@ -30,6 +30,9 @@ Discovery Score
     geography 30%). Missing factors are left out and the remaining weights are rescaled, and
     "coverage" says how much of the full weight was available.
 
+Ranking: sorting uses the Discovery Score with any missing factor counted as a neutral 50, so
+papers with unknown affiliations are not pushed to the top. The displayed score is unchanged.
+
 A paper does not need to score high on all three. It is flagged as underrepresented when the
 Discovery Score reaches OVERALL_THRESHOLD, or when any single factor reaches FACTOR_THRESHOLD
 (for example a common topic from a rarely seen country).
@@ -53,6 +56,7 @@ DEFAULT_WEIGHTS = {"topic": 0.4, "institution": 0.3, "geography": 0.3}
 FACTOR_THRESHOLD = float(os.environ.get("DISCOVERY_FACTOR_THRESHOLD", "75"))
 OVERALL_THRESHOLD = float(os.environ.get("DISCOVERY_OVERALL_THRESHOLD", "60"))
 MIN_FIELD_SAMPLE = int(os.environ.get("DISCOVERY_MIN_FIELD_SAMPLE", "20"))
+NEUTRAL_FOR_RANKING = 50.0
 CACHE_SECONDS = int(os.environ.get("DISCOVERY_CACHE_SECONDS", "600"))
 MEASURES = (
     "Representation inside the imported arXiv dataset only. This is not a visibility measure: "
@@ -156,11 +160,23 @@ class DiscoveryIndex:
             topic, basis = self.subtopic_scores[field].get(str(cluster)), "subtopic"
         else:
             topic, basis = self.category_scores.get(field), "category"
+        missing: dict[str, str] = {}
+        if institution and field not in self.institution_scores:
+            missing["institution"] = "small_field"
+        elif not institution:
+            missing["institution"] = "not_documented"
+        if country and field not in self.country_scores:
+            missing["geography"] = "small_field"
+        elif not country:
+            missing["geography"] = "not_documented"
+        if topic is None:
+            missing["topic"] = "small_field"
         return {
             "topic": topic,
             "institution": self.institution_scores.get(field, {}).get(institution) if institution else None,
             "geography": self.country_scores.get(field, {}).get(country) if country else None,
             "topic_basis": basis,
+            "missing": missing,
         }
 
 
@@ -182,6 +198,7 @@ def combine(factors: dict[str, Any], weights: dict[str, float] | None = None) ->
         "discovery_score": score,
         "factors": {key: factors.get(key) for key in FACTORS},
         "topic_basis": factors.get("topic_basis"),
+        "missing": {key: value for key, value in (factors.get("missing") or {}).items() if factors.get(key) is None},
         "weights": {key: round(weights[key], 4) for key in FACTORS},
         "coverage": round(coverage, 4),
         "flags": flags,
@@ -263,8 +280,17 @@ def ranked_ids(
             continue
         field, institution, country, cluster = known
         scored.append((arxiv_id, combine(index.factors(field, institution, country, cluster), weights)))
-    scored.sort(key=lambda item: (item[1]["discovery_score"] is None, -(item[1]["discovery_score"] or 0), -item[1]["coverage"]))
+    scored.sort(key=lambda item: (-ranking_value(item[1]), -item[1]["coverage"]))
     return scored
+
+
+def ranking_value(result: dict[str, Any]) -> float:
+    """Sort key only (the shown score is unchanged): a missing factor counts as a neutral 50,
+    so a paper is not pushed to the top just because its institution or country is unknown."""
+    if result["discovery_score"] is None:
+        return -1.0
+    coverage = result["coverage"]
+    return result["discovery_score"] * coverage + NEUTRAL_FOR_RANKING * (1 - coverage)
 
 
 def field_report(index: DiscoveryIndex, field: str, top: int = 8) -> dict[str, Any]:

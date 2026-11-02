@@ -53,7 +53,9 @@ export function DiscoveryBreakdown({ discovery, field }: { discovery?: Discovery
             <div key={key} className={value === null ? 'missing' : ''} title={FACTOR_HELP[key]}>
               <span>{FACTOR_NAMES[key]} <small>{Math.round(discovery.weights[key] * 100)}%</small></span>
               <div className="gap-bar"><i style={{ width: `${value === null ? 0 : Math.max(2, value)}%`, background: scoreColor(value) }} /></div>
-              <b>{value === null ? 'Not documented' : value.toFixed(0)}</b>
+              <b title={discovery.missing?.[key] === 'small_field' ? 'Fewer than 20 documented papers in this field, so there is nothing fair to compare against yet.' : undefined}>
+                {value !== null ? value.toFixed(0) : discovery.missing?.[key] === 'small_field' ? 'Too few to compare' : 'Not documented'}
+              </b>
             </div>
           )
         })}
