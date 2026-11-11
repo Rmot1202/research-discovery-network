@@ -1,3 +1,10 @@
+# Never read .env.local / .env (they may hold the Neon connection strings) during tests.
+import os as _os
+
+_os.environ["RDN_SKIP_ENV_FILES"] = "1"
+_os.environ.pop("DATABASE_URL", None)
+_os.environ.pop("DATABASE_URL_UNPOOLED", None)
+
 import json
 import tempfile
 import unittest

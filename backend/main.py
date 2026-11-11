@@ -14,6 +14,10 @@ from typing import Any
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.env_files import load_env_files
+
+load_env_files()  # .env.local (from `neon deploy` / `neon env pull`), then .env; real env vars win
+
 from backend.ai_service import (
     extract_pdf_affiliations, generate_embeddings, generate_research_analysis,
 )

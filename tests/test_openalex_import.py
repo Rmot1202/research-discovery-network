@@ -2,7 +2,9 @@
 import os as _os
 import tempfile as _tempfile
 
+_os.environ["RDN_SKIP_ENV_FILES"] = "1"  # never read .env.local (Neon) during tests
 _os.environ.pop("DATABASE_URL", None)
+_os.environ.pop("DATABASE_URL_UNPOOLED", None)
 _os.environ["PAPERS_DB"] = _os.path.join(_tempfile.mkdtemp(), "papers.sqlite3")
 
 import os

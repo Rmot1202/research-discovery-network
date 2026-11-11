@@ -7,7 +7,15 @@ import sys
 import time
 from pathlib import Path
 
-from backend.main import connect_db
+from backend.env_files import load_env_files
+
+load_env_files()
+# Bulk copies go over Neon's direct (unpooled) connection, as Neon recommends for
+# dumps and migrations. Falls back to DATABASE_URL when there is no direct string.
+if os.environ.get("DATABASE_URL_UNPOOLED"):
+    os.environ["DATABASE_URL"] = os.environ["DATABASE_URL_UNPOOLED"]
+
+from backend.main import connect_db  # noqa: E402 - must import after choosing the URL
 
 
 SOURCE = Path(os.environ.get("PAPERS_DB", Path(__file__).parent / "data" / "papers.sqlite3"))

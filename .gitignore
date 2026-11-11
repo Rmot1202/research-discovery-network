@@ -35,3 +35,4 @@ backup-*/
 /outputs/
 *.gguf
 *.dump
+.neon

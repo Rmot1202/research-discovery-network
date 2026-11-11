@@ -317,9 +317,22 @@ The pieces, all on free plans:
 | Admin sign-in | Firebase Authentication (Google) | no passwords to manage; only emails in `ADMIN_EMAILS` get admin access |
 | Daily imports | GitHub Actions (`update-papers.yml`) | nothing to run on your own computer |
 
-1. **Database.** Create a free project at [neon.com](https://neon.com) and copy its connection
-   string (`postgresql://...?sslmode=require`). Moving from an existing Render database:
-   `RENDER_URL="<Render External URL>" NEON_URL="<Neon URL>" bash scripts/move_db_to_neon.sh` (needs `pg_dump`/`pg_restore`;
+1. **Database.** This repo is linked to Neon project `shy-cell-28779860`, branch `production`
+   (`neon.ts` + the gitignored `.neon`). To get the connection strings locally:
+
+   ```bash
+   npm i -g neon@latest
+   neon login                       # one-time browser sign-in
+   neon env pull --file .env.local  # writes DATABASE_URL (pooled) and DATABASE_URL_UNPOOLED (direct)
+   ```
+
+   The backend reads env in this order: real environment variables, then `.env.local`, then `.env`
+   (a file never overrides a variable that is already set; `RDN_SKIP_ENV_FILES=1` turns file loading
+   off, and the tests always do). Use the **pooled** `DATABASE_URL` (`-pooler` host) for the app,
+   Render and the GitHub Action; `backend.migrate_to_postgres` and `pg_dump`/`pg_restore` use the
+   **direct** `DATABASE_URL_UNPOOLED`. Never commit `.env.local` (it is in `.gitignore`).
+   Moving from an existing Render database: Moving from an existing Render database:
+   `RENDER_URL="<Render External URL>" NEON_URL="<DATABASE_URL_UNPOOLED>" bash scripts/move_db_to_neon.sh` (needs `pg_dump`/`pg_restore`;
    `brew install libpq` on a Mac). Starting fresh: leave it empty; the daily job fills it.
 2. **Firebase.** In the [Firebase console](https://console.firebase.google.com) create a project,
    then **Build → Authentication → Get started → Sign-in method → Google → Enable**. Under
@@ -327,12 +340,12 @@ The pieces, all on free plans:
    Under **Project settings → General → Your apps** add a Web app and note `apiKey`,
    `authDomain` and `projectId`.
 3. **Render.** **New → Blueprint**, pick this repository, **Apply**, and fill in:
-   `DATABASE_URL` (Neon string), `FIREBASE_PROJECT_ID`, `FIREBASE_WEB_API_KEY`,
+   `DATABASE_URL` (Neon pooled string), `FIREBASE_PROJECT_ID`, `FIREBASE_WEB_API_KEY`,
    `FIREBASE_AUTH_DOMAIN`, `ADMIN_EMAILS` (comma-separated, for example `you@gmail.com`).
    `ADMIN_API_TOKEN` is generated and still works as a fallback login for scripts.
    If you already have the old Blueprint with `research-discovery-db`, delete that database in
    Render after the Neon copy is checked.
-4. **GitHub secrets** (Settings → Secrets and variables → Actions): `DATABASE_URL` (the same Neon
+4. **GitHub secrets** (Settings → Secrets and variables → Actions): `DATABASE_URL` (the same pooled Neon
    string) and `OPENALEX_API_KEY` (free at [openalex.org/settings/api](https://openalex.org/settings/api)).
    Then Actions → Update papers → **Run workflow** once to test.
 5. Open the site → Admin → **Sign in with Google**.
