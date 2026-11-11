@@ -33,10 +33,14 @@ Terminal 1, the API:
 
 ```sh
 source .venv/bin/activate
-open -a Docker                 # only if you use PostgreSQL (DATABASE_URL is set in .env)
-docker compose up -d postgres  # only if you use PostgreSQL
-uvicorn --env-file .env backend.main:app --port 8001 --reload
+uvicorn backend.main:app --port 8001 --reload
 ```
+
+The backend loads `.env.local` (the Neon strings from `neon env pull --file .env.local`) and then
+`.env` by itself; variables already set in your shell win. Don't add `--env-file .env`: it would
+load `.env` first and override `.env.local`. To work against local Docker PostgreSQL instead,
+see [Start locally with PostgreSQL](#start-locally-with-postgresql). Setup history, operations
+and troubleshooting are in [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 Terminal 2, the website:
 
@@ -45,7 +49,8 @@ npx pnpm install   # first time, or after package.json changes
 npx pnpm dev       # opens on http://localhost:8443
 ```
 
-Run the tests with `python -m unittest discover -s tests`.
+Run the tests with `python -m unittest discover -s tests`. They always use a throwaway SQLite
+file and never read `.env`, `.env.local` or your shell's `DATABASE_URL`, so they can't touch Neon.
 
 ## Start locally with PostgreSQL
 
@@ -331,9 +336,11 @@ The pieces, all on free plans:
    off, and the tests always do). Use the **pooled** `DATABASE_URL` (`-pooler` host) for the app,
    Render and the GitHub Action; `backend.migrate_to_postgres` and `pg_dump`/`pg_restore` use the
    **direct** `DATABASE_URL_UNPOOLED`. Never commit `.env.local` (it is in `.gitignore`).
-   Moving from an existing Render database: Moving from an existing Render database:
-   `RENDER_URL="<Render External URL>" NEON_URL="<DATABASE_URL_UNPOOLED>" bash scripts/move_db_to_neon.sh` (needs `pg_dump`/`pg_restore`;
-   `brew install libpq` on a Mac). Starting fresh: leave it empty; the daily job fills it.
+   Moving from an existing Render database (done on 2026-11-11, see
+   [docs/OPERATIONS.md](docs/OPERATIONS.md#move-data-between-databases)):
+   `RENDER_URL="<Render External URL>" NEON_URL="<DATABASE_URL_UNPOOLED>" bash scripts/move_db_to_neon.sh`.
+   It needs `pg_dump`/`pg_restore` 16+; on an Intel Mac, run it inside Docker instead of building
+   `libpq` with Homebrew. Starting fresh: leave it empty; the daily job fills it.
 2. **Firebase.** In the [Firebase console](https://console.firebase.google.com) create a project,
    then **Build → Authentication → Get started → Sign-in method → Google → Enable**. Under
    **Authentication → Settings → Authorized domains** add `research-discovery-network.onrender.com`.
@@ -362,7 +369,13 @@ papers at `DB_STORAGE_LIMIT_MB` (default 900) so the database never fills up.
 | `Update papers` (`.github/workflows/update-papers.yml`) | every day at 06:30 UTC, or by hand from the Actions tab | arXiv import + backfill, OpenAlex import, affiliations, embeddings, summaries |
 
 - **Code changes (CD):** `render.yaml` sets `autoDeployTrigger: checksPass`, so Render
-  deploys a push to `main` only after CI passes.
+  deploys a push to `main` only after CI passes. If CI is disabled or never reports, Render does
+  not deploy at all; use Render → **Manual Deploy → Deploy latest commit**.
+- **How to change code:** work on a branch, open a pull request, wait for CI, then merge.
+  Merging to `main` is what deploys the site.
+- **Actions minutes:** the repo is public, so GitHub Actions minutes are free and unlimited. If it
+  ever goes private again, the daily job (60-75 minutes) uses most of the 2,000 free minutes a
+  month; lower `SUMMARY_MINUTES` and `OPENALEX_MINUTES` in the repo's Actions variables.
 - **No more local loading:** the workflow writes straight into Neon. `migrate_to_postgres`
   is only needed once if you want to copy an old local SQLite file.
 - **Catch up after a gap:** Actions → Update papers → Run workflow, and enter a start date.
