@@ -297,63 +297,90 @@ the review dashboard to:
   page text, and still require reviewer confirmation before saving.
 - Approve or reject a paper. Only approved papers appear in **Featured papers**.
 
-Admin routes require `Authorization: Bearer <ADMIN_API_TOKEN>`. The frontend
-keeps the entered token in page memory only; it is not stored in source code or
-browser storage.
+Admin routes accept either a Firebase ID token from **Sign in with Google** (the email must be
+in `ADMIN_EMAILS`, or the user must have the `admin` custom claim) or
+`Authorization: Bearer <ADMIN_API_TOKEN>` for scripts. The token is kept in page memory only.
 
 ## Deploy online
 
 The `Dockerfile` builds the website and serves it from the same FastAPI app, so
 one web service hosts everything (the site at `/`, the API at `/api/...`).
 
-### Option A: Render (recommended, uses `render.yaml`)
+### Option A: Render + Neon + Firebase (recommended, uses `render.yaml`)
 
-1. Push this repo to GitHub (already done if you cloned it from there).
-2. Sign in at [render.com](https://render.com) with GitHub, then
-   **New → Blueprint** and pick this repository. Click **Apply**.
-   Render creates the web service `research-discovery-network` and the
-   PostgreSQL database `research-discovery-db`.
-3. While it builds, fill in the optional variables it asks for
-   (`AI_BASE_URL`, `AI_API_KEY`, `AI_CHAT_MODEL`, `AI_EMBEDDING_MODEL`,
-   `OPENALEX_API_KEY`). Leave them blank to skip the AI features for now.
-4. Load your papers into the hosted database. In Render, open
-   **research-discovery-db → Connect → External Database URL** and copy it.
-   Then, on your own computer in the project folder:
+The pieces, all on free plans:
 
-   ```bash
-   DATABASE_URL="<External Database URL>" .venv/bin/python -m backend.migrate_to_postgres
-   ```
+| Piece | Service | Why |
+|---|---|---|
+| Website + API | Render web service | builds the `Dockerfile` |
+| Database | [Neon](https://neon.com) PostgreSQL | Render's free PostgreSQL is deleted after 30 days (plus a 14-day grace period); Neon's free plan does not expire |
+| Admin sign-in | Firebase Authentication (Google) | no passwords to manage; only emails in `ADMIN_EMAILS` get admin access |
+| Daily imports | GitHub Actions (`update-papers.yml`) | nothing to run on your own computer |
 
-   This copies `backend/data/papers.sqlite3` (set `PAPERS_DB` to use another
-   file). Run it again any time you want to push newly imported papers.
-5. Open the `https://research-discovery-network.onrender.com` URL Render
-   shows. To use Admin review, copy `ADMIN_API_TOKEN` from the web service's
-   **Environment** tab.
+1. **Database.** Create a free project at [neon.com](https://neon.com) and copy its connection
+   string (`postgresql://...?sslmode=require`). Moving from an existing Render database:
+   `RENDER_URL="<Render External URL>" NEON_URL="<Neon URL>" bash scripts/move_db_to_neon.sh` (needs `pg_dump`/`pg_restore`;
+   `brew install libpq` on a Mac). Starting fresh: leave it empty; the daily job fills it.
+2. **Firebase.** In the [Firebase console](https://console.firebase.google.com) create a project,
+   then **Build → Authentication → Get started → Sign-in method → Google → Enable**. Under
+   **Authentication → Settings → Authorized domains** add `research-discovery-network.onrender.com`.
+   Under **Project settings → General → Your apps** add a Web app and note `apiKey`,
+   `authDomain` and `projectId`.
+3. **Render.** **New → Blueprint**, pick this repository, **Apply**, and fill in:
+   `DATABASE_URL` (Neon string), `FIREBASE_PROJECT_ID`, `FIREBASE_WEB_API_KEY`,
+   `FIREBASE_AUTH_DOMAIN`, `ADMIN_EMAILS` (comma-separated, for example `you@gmail.com`).
+   `ADMIN_API_TOKEN` is generated and still works as a fallback login for scripts.
+   If you already have the old Blueprint with `research-discovery-db`, delete that database in
+   Render after the Neon copy is checked.
+4. **GitHub secrets** (Settings → Secrets and variables → Actions): `DATABASE_URL` (the same Neon
+   string) and `OPENALEX_API_KEY` (free at [openalex.org/settings/api](https://openalex.org/settings/api)).
+   Then Actions → Update papers → **Run workflow** once to test.
+5. Open the site → Admin → **Sign in with Google**.
 
-Free-plan limits: the web service sleeps after 15 minutes idle (the first
-visit after that takes about a minute), and free Render PostgreSQL databases
-expire after 30 days. Change the database plan to `basic-256mb`, or point
-`DATABASE_URL` at a free [Neon](https://neon.tech) database, to keep the data.
+Free-plan limits: the Render web service sleeps after 15 minutes idle (the first visit after that
+takes about a minute). Neon's free plan has 1 GB of storage per project; the importer stops adding
+papers at `DB_STORAGE_LIMIT_MB` (default 900) so the database never fills up.
 
 ### Keeping the site up to date (CI/CD)
-
-Two GitHub Actions workflows run automatically once the repo is on GitHub:
 
 | Workflow | When | What it does |
 |---|---|---|
 | `CI` (`.github/workflows/ci.yml`) | every push and pull request | type-checks and builds the site, runs the Python tests, builds the Docker image and checks that it starts |
-| `Update papers` (`.github/workflows/update-papers.yml`) | every day at 06:30 UTC, or by hand from the Actions tab | imports Computer Science papers arXiv added since the last run, then looks up their affiliations on OpenAlex |
+| `Update papers` (`.github/workflows/update-papers.yml`) | every day at 06:30 UTC, or by hand from the Actions tab | arXiv import + backfill, OpenAlex import, affiliations, embeddings, summaries |
 
 - **Code changes (CD):** `render.yaml` sets `autoDeployTrigger: checksPass`, so Render
-  deploys a push to `main` only after CI passes. A broken commit never goes live.
-- **New papers:** the update workflow writes straight into the hosted database, so the
-  live site shows them without a redeploy. One-time setup: in GitHub open
-  **Settings → Secrets and variables → Actions → New repository secret** and add
-  `DATABASE_URL` (the Render External Database URL). `OPENALEX_API_KEY` and
-  `OPENALEX_EMAIL` are optional. Or from a terminal: `gh secret set DATABASE_URL`.
-  If you change the database password, update this secret too.
+  deploys a push to `main` only after CI passes.
+- **No more local loading:** the workflow writes straight into Neon. `migrate_to_postgres`
+  is only needed once if you want to copy an old local SQLite file.
 - **Catch up after a gap:** Actions → Update papers → Run workflow, and enter a start date.
-- **Locally:** `python -m backend.update_papers` (add `--since 2026-10-01` to choose the start date).
+
+### Daily imports: arXiv and OpenAlex
+
+Each run does two lanes per source:
+
+- **arXiv:** papers added since the last run, then `ARXIV_BACKFILL_PAGES` (default 10, about
+  10,000 records) of older weeks, walking back toward 2005.
+- **OpenAlex** (`backend/openalex_import.py`): Computer Science works (field 17) with an abstract,
+  English, not retracted, articles/preprints/reviews. First the last `OPENALEX_RECENT_DAYS` (7) of
+  publications, then one older publication day at a time back to `OPENALEX_START_DATE`
+  (2015-01-01), remembering where it stopped. Works that are also on arXiv are skipped (arXiv
+  already has them). Authors' institutions and countries come with each work, so these papers
+  need no affiliation scan.
+- **Budget:** a free OpenAlex key has $1/day (resets at midnight UTC); one list call costs
+  $0.0001 and returns up to 100 works, so the money allows far more than the job can store. The
+  importer reads the remaining budget from the response headers and keeps `OPENALEX_RESERVE_CREDITS`
+  (1,000 calls) for the affiliation step. The real limits are `OPENALEX_DAILY_MAX` (20,000 new
+  papers), `OPENALEX_MINUTES` (20) and the database size.
+- OpenAlex IDs (`W...`) are stored in the same `arxiv_id` column, link to `openalex.org/works/W...`,
+  and the assistant cites them as `[OpenAlex:W...]`.
+- Test locally: `python -m backend.openalex_import --dry-run --max-new 50`.
+
+### Admin dashboard: today's papers
+
+The dashboard opens on **papers loaded today** (by `ingested_at`, in your time zone), with counts
+per source, the database size and the import run log. Use the date picker to look at another day
+and the source filter for arXiv or OpenAlex only. Older papers loaded before this change have no
+`ingested_at`, so they only show under "all days" in search, not in the daily view.
 
 ### Publishing: auto or review
 
@@ -382,19 +409,9 @@ assistant still answers with cited search results, just without an LLM summary.
 ### Using your own model instead of OpenAI or Groq
 
 The assistant talks to any OpenAI-compatible server, so you can run an open model you
-control. Point `AI_BASE_URL` at it and set `AI_CHAT_MODEL`.
-
-- **Run an open model (no training):** Llama, Qwen or Mistral through Ollama, vLLM or
-  llama.cpp. It knows the papers through retrieval (each answer is built from the papers
-  the search finds), so it doesn't need training to cover new papers.
-- **Fine-tune one (optional):** LoRA fine-tuning of a small model (about 1–8B
-  parameters) on approved summaries can teach it your summary style. That's possible on
-  one rented or free notebook GPU. Training a model from scratch is not realistic here.
-- **Hosting it:** a model needs a GPU or a large-memory machine, so it can't run on
-  Render's free plan. Options are your own computer (it must stay on and be reachable
-  over HTTPS, for example through a Cloudflare Tunnel), a GPU host such as Hugging Face
-  Inference Endpoints, Modal or RunPod, or batch jobs that write summaries into the
-  database ahead of time so the live site doesn't need the model at all.
+control: point `AI_BASE_URL` at it and set `AI_CHAT_MODEL`. `training/` has a full kit to
+fine-tune a small open model (Qwen2.5 1.5B/3B) for this exact job and serve it with Ollama;
+see [training/README.md](training/README.md).
 
 ### Option B: other hosts
 

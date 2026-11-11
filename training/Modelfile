@@ -1,0 +1,15 @@
+# Ollama model for the Research Discovery Network assistant.
+# Put the GGUF from train_lora.py next to this file, then:
+#   ollama create rdn-assistant -f Modelfile
+#   ollama run rdn-assistant
+# The app supplies its own system prompt, so none is set here.
+FROM ./rdn-assistant-gguf/unsloth.Q4_K_M.gguf
+
+TEMPLATE """{{- range .Messages }}<|im_start|>{{ .Role }}
+{{ .Content }}<|im_end|>
+{{ end }}<|im_start|>assistant
+"""
+PARAMETER stop "<|im_end|>"
+PARAMETER stop "<|im_start|>"
+PARAMETER temperature 0.2
+PARAMETER num_ctx 8192

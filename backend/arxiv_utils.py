@@ -8,6 +8,13 @@ def normalize_arxiv_id(identifier: str) -> str:
 
 
 OLD_STYLE_NUMBER = re.compile(r"\d{7}")
+# Papers imported from OpenAlex are stored under their OpenAlex work ID (W1234567890) in the
+# same arxiv_id column, so every table and query keeps working unchanged.
+OPENALEX_ID = re.compile(r"W\d+")
+
+
+def is_openalex_id(paper_id: str) -> bool:
+    return bool(OPENALEX_ID.fullmatch(paper_id or ""))
 
 
 def arxiv_path(arxiv_id: str, categories: list[str] | None = None, primary_category: str | None = None) -> str:
@@ -24,8 +31,12 @@ def arxiv_path(arxiv_id: str, categories: list[str] | None = None, primary_categ
 
 
 def abs_url(arxiv_id: str, categories: list[str] | None = None, primary_category: str | None = None) -> str:
+    if is_openalex_id(arxiv_id):
+        return f"https://openalex.org/works/{arxiv_id}"
     return f"https://arxiv.org/abs/{arxiv_path(arxiv_id, categories, primary_category)}"
 
 
 def pdf_url(arxiv_id: str, categories: list[str] | None = None, primary_category: str | None = None) -> str:
+    if is_openalex_id(arxiv_id):
+        return f"https://openalex.org/works/{arxiv_id}"  # serialize_paper prefers the open-access PDF
     return f"https://arxiv.org/pdf/{arxiv_path(arxiv_id, categories, primary_category)}"

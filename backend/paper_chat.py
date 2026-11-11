@@ -242,9 +242,10 @@ def collection_stats(connect_db: Callable[[], Any]) -> dict[str, Any]:
 
 
 SYSTEM_PROMPT = (
-    "You are the research assistant for the Research Discovery Network, an archive of arXiv "
-    "Computer Science papers. Answer using ONLY the collection statistics and the retrieved papers "
-    "supplied in the user message. Cite every paper you mention inline as [arXiv:ID]. If the "
+    "You are the research assistant for the Research Discovery Network, an archive of Computer "
+    "Science papers from arXiv and OpenAlex. Answer using ONLY the collection statistics and the "
+    "retrieved papers supplied in the user message. Cite every paper you mention inline as "
+    "[arXiv:ID] (or [OpenAlex:ID] when the ID starts with W). If the "
     "retrieved papers do not answer the question, say so plainly and suggest a better search term "
     "or topic; never invent papers, results, authors, or affiliations. Do not infer author identity, "
     "demographics, institution, or country from names. When asked whether research is "
@@ -254,16 +255,15 @@ SYSTEM_PROMPT = (
 )
 
 
-def answer_question(
+def build_chat_messages(
     question: str,
     history: list[dict[str, str]],
     papers: list[dict[str, Any]],
     stats: dict[str, Any],
     category: str | None,
-) -> str:
-    model = os.environ.get("AI_CHAT_MODEL", "")
-    if not model:
-        raise HTTPException(status_code=503, detail="Configure AI_CHAT_MODEL to enable the research assistant.")
+) -> list[dict[str, str]]:
+    """Build the exact prompt the assistant sees. training/build_dataset.py reuses this so a
+    fine-tuned model is trained on the same format it gets in production."""
     context = {
         "collection": stats,
         "topic_scope": f"{category} {CATEGORY_LABELS.get(category, '')}" if category else "all topics",
@@ -288,6 +288,20 @@ def answer_question(
         "role": "user",
         "content": f"Question: {question}\n\nArchive context (JSON):\n{json.dumps(context, ensure_ascii=False)}",
     })
+    return messages
+
+
+def answer_question(
+    question: str,
+    history: list[dict[str, str]],
+    papers: list[dict[str, Any]],
+    stats: dict[str, Any],
+    category: str | None,
+) -> str:
+    model = os.environ.get("AI_CHAT_MODEL", "")
+    if not model:
+        raise HTTPException(status_code=503, detail="Configure AI_CHAT_MODEL to enable the research assistant.")
+    messages = build_chat_messages(question, history, papers, stats, category)
     result = ai_request("chat/completions", {"model": model, "temperature": 0.2, "messages": messages})
     try:
         content = result["choices"][0]["message"]["content"]
