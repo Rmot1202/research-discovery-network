@@ -180,19 +180,30 @@ def _arxiv_doi(arxiv_id: str) -> str:
 def fetch_openalex(arxiv_ids: list[str]) -> dict[str, dict[str, Any]]:
     """Return OpenAlex works keyed by arXiv ID for one batch of up to 50 papers."""
     by_doi = {_arxiv_doi(arxiv_id): arxiv_id for arxiv_id in arxiv_ids}
+
     params = {
         "filter": "doi:" + "|".join(by_doi),
         "select": "id,doi,authorships",
         "per-page": str(OPENALEX_BATCH),
     }
+
     if os.environ.get("OPENALEX_EMAIL"):
         params["mailto"] = os.environ["OPENALEX_EMAIL"]
-    data = _http_json(f"{OPENALEX_URL}?{urllib.parse.urlencode(params, safe='|:/')}")
+
+    api_key = os.environ.get("OPENALEX_API_KEY", "").strip()
+    if api_key:
+        params["api_key"] = api_key
+
+    data = _http_json(
+        f"{OPENALEX_URL}?{urllib.parse.urlencode(params, safe='|:/')}"
+    )
+
     works = {}
     for work in data.get("results", []):
         doi = (work.get("doi") or "").lower().replace("https://doi.org/", "")
         if doi in by_doi:
             works[by_doi[doi]] = work
+
     return works
 
 
