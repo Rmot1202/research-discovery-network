@@ -11,3 +11,13 @@ backup-*
 notebooks
 ._*
 .DS_Store
+.agents
+.claude
+.codex
+.vscode
+.mcp.json
+.neon
+skills-lock.json
+training/data
+*.dump
+docs
