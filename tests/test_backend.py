@@ -316,16 +316,18 @@ class ReviewWorkflowTests(unittest.TestCase):
             ReviewUpdate(approval_status="approved", summary="A reviewed plain-language summary."),
             "Bearer test-token",
         )
-        result = main.list_featured_papers(
-            limit=12,
-            offset=0,
-            q="",
-            category=None,
-            country=None,
-            institution=None,
-            year=None,
-            sort="newest",
-        )
+        # Pin review mode: PUBLISH_MODE=auto in your shell (e.g. from .env) must not change this test.
+        with patch.object(main, "PUBLISH_MODE", "review"):
+            result = main.list_featured_papers(
+                limit=12,
+                offset=0,
+                q="",
+                category=None,
+                country=None,
+                institution=None,
+                year=None,
+                sort="newest",
+            )
         self.assertEqual(result["total"], 1)
         self.assertEqual(result["papers"][0]["arxiv_id"], "2601.00001")
         self.assertEqual(result["papers"][0]["summary"], "A reviewed plain-language summary.")
