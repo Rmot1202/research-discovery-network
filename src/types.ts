@@ -28,6 +28,11 @@ export type Paper = {
   countries_all?: string[] | null
   has_school_affiliation?: boolean | null
   approval_status: string
+  source?: 'arxiv' | 'openalex'
+  ingested_at?: string | null
+  venue?: string | null
+  doi?: string | null
+  cited_by_count?: number | null
 }
 
 export type Discovery = {
@@ -68,6 +73,21 @@ export type AdminOverview = {
   embedded: number
   ai_configured: boolean
   publish_mode?: 'review' | 'auto'
+}
+export type ImportRun = {
+  started_at: string
+  finished_at: string
+  source: 'arxiv' | 'openalex'
+  inserted: number
+  details: Record<string, unknown>
+}
+export type AdminToday = {
+  day: string
+  loaded: number
+  by_source: { arxiv: number; openalex: number }
+  runs: ImportRun[]
+  database_mb: number | null
+  storage_limit_mb: number
 }
 export type PaperDraft = Pick<Paper, 'summary' | 'key_contribution' | 'application' | 'relevance'>
 export type AffiliationDraft = { institution: string; country: string; source_url: string; evidence: string }

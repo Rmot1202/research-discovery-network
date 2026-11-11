@@ -592,3 +592,9 @@ h1 em { color: #209c84; font-style: normal; }
 .discovery-factors > div.missing b { color: #9aaaaa; font-weight: 400; }
 .discovery-note { margin: 10px 0 0; color: #7c8f91; font-size: 11px; line-height: 1.5; }
 @media (max-width: 560px) { .discovery-factors > div { grid-template-columns: 1fr auto; gap: 4px 10px; } .discovery-factors > div .gap-bar { grid-column: 1 / -1; grid-row: 2; } }
+
+/* Admin: daily import view */
+.admin-login-options { display: grid; gap: 1rem; }
+.import-runs { margin: .5rem 0 0; padding-left: 1.1rem; display: grid; gap: .3rem; font-size: .9rem; }
+.admin-queue-count { margin: .75rem 0; opacity: .8; font-size: .9rem; }
+.analysis-controls label { display: grid; gap: .25rem; font-size: .85rem; }

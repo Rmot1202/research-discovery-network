@@ -12,6 +12,7 @@ import { DiscoveryBreakdown, DiscoveryPill } from './components/DiscoveryScore'
 import type { MapCommand } from './types'
 import type {
   AdminOverview,
+  AdminToday,
   AffiliationDraft,
   AffiliationSuggestion,
   GapReport,
@@ -62,6 +63,10 @@ export default function App() {
   const [adminToken, setAdminToken] = useState('')
   const [adminOverview, setAdminOverview] = useState<AdminOverview | null>(null)
   const [adminPapers, setAdminPapers] = useState<Paper[]>([])
+  const [adminToday, setAdminToday] = useState<AdminToday | null>(null)
+  const [adminDay, setAdminDay] = useState('')  // '' = today in this browser's time zone
+  const [adminSource, setAdminSource] = useState<'' | 'arxiv' | 'openalex'>('')
+  const [adminTotal, setAdminTotal] = useState(0)
   const [adminError, setAdminError] = useState('')
   const [adminNotice, setAdminNotice] = useState('')
   const [adminBusyId, setAdminBusyId] = useState('')
@@ -136,13 +141,25 @@ export default function App() {
     [gapReport],
   )
 
-  const loadAdminDashboard = async (token: string) => {
+  const loadAdminDashboard = async (
+    token: string,
+    day: string = adminDay,
+    source: '' | 'arxiv' | 'openalex' = adminSource,
+  ) => {
     setAdminError('')
     try {
-      const [overview, queue] = await Promise.all([
+      const dayParams = new URLSearchParams({ tz_offset_minutes: String(new Date().getTimezoneOffset()) })
+      if (day) dayParams.set('day', day)
+      const queueParams = new URLSearchParams(dayParams)
+      queueParams.set('limit', '50')
+      if (source) queueParams.set('source', source)
+      const [overview, queue, today] = await Promise.all([
         adminRequest<AdminOverview>(token, '/api/admin/overview'),
-        adminRequest<{ papers: Paper[] }>(token, '/api/admin/reviews?limit=20'),
+        adminRequest<{ papers: Paper[]; total: number; day: string }>(token, `/api/admin/reviews?${queueParams}`),
+        adminRequest<AdminToday>(token, `/api/admin/today?${dayParams}`),
       ])
+      setAdminToday(today)
+      setAdminTotal(queue.total)
       setAdminOverview(overview)
       setAdminPapers(queue.papers)
       setAdminToken(token)
@@ -570,6 +587,16 @@ export default function App() {
         tokenInput={adminTokenInput}
         overview={adminOverview}
         papers={adminPapers}
+        papersTotal={adminTotal}
+        today={adminToday}
+        day={adminDay}
+        source={adminSource}
+        onDayChange={(day) => { setAdminDay(day); if (adminToken) void loadAdminDashboard(adminToken, day, adminSource) }}
+        onSourceChange={(source) => { setAdminSource(source); if (adminToken) void loadAdminDashboard(adminToken, adminDay, source) }}
+        onLogout={() => {
+          setAdminToken(''); setAdminOverview(null); setAdminPapers([]); setAdminToday(null)
+          void import('./auth').then(({ signOutFirebase }) => signOutFirebase())
+        }}
         error={adminError}
         notice={adminNotice}
         busyId={adminBusyId}

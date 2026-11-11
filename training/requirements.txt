@@ -1,0 +1,5 @@
+# GPU notebook only (Colab / Kaggle). Not needed by the web app.
+unsloth
+datasets
+trl
+transformers

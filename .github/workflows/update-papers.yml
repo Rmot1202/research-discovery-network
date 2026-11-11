@@ -1,21 +1,29 @@
-# Keeps the hosted site up to date with arXiv, every day:
-#   1. imports new Computer Science papers,
-#   2. reads affiliations from the new papers' PDFs (free, no OpenAlex),
-#   3. embeds and groups the new papers into subtopics (free local model),
-#   4. writes plain-language summaries with a free open model (Ollama on the runner).
-# Writes straight to the hosted database, so the live site updates without a redeploy.
+# Keeps the hosted site up to date every day, with nothing to run on your own computer:
+#   1. imports new arXiv Computer Science papers, then backfills a few older arXiv weeks,
+#   2. imports as many OpenAlex Computer Science papers as the free daily budget and the
+#      database size allow (affiliations come with them),
+#   3. reads affiliations for new arXiv papers (OpenAlex first when a key is set, then PDFs),
+#   4. embeds and groups the new papers into subtopics (free local model),
+#   5. writes plain-language summaries with a free open model (Ollama on the runner).
+# Writes straight to the hosted database (Neon), so the live site updates without a redeploy.
 #
-# Setup (once): GitHub repo → Settings → Secrets and variables → Actions
-#   Secret   DATABASE_URL   Render database "External Database URL" (required)
+# Setup (once): GitHub repo -> Settings -> Secrets and variables -> Actions
+#   Secret   DATABASE_URL      Neon connection string (required)
+#   Secret   OPENALEX_API_KEY  free key from https://openalex.org/settings/api (needed for step 2)
 #   Optional secrets AI_BASE_URL / AI_API_KEY / AI_CHAT_MODEL: use a hosted model instead of Ollama.
-#   Optional variables (Variables tab): SUMMARY_MODEL (default qwen2.5:1.5b),
-#     SUMMARY_MINUTES (default 25), AFFILIATION_DAILY_LIMIT (default 300).
-# Private repos get 2,000 free Actions minutes a month; this job is capped at about 60 min a day.
+#   Optional variables (Variables tab):
+#     OPENALEX_DAILY_MAX (default 20000)   OPENALEX_MINUTES (default 20)
+#     ARXIV_BACKFILL_PAGES (default 10)    DB_STORAGE_LIMIT_MB (default 900, Neon Free is 1 GB)
+#     SUMMARY_MODEL (default qwen2.5:1.5b) SUMMARY_MINUTES (default 25)
+#     AFFILIATION_DAILY_LIMIT (default 300)
+# Minutes: private repos get 2,000 free Actions minutes a month; public repos are unlimited.
+# With the defaults this job runs about 60-75 minutes a day. Lower SUMMARY_MINUTES or
+# OPENALEX_MINUTES (or make the repo public) if you get close to the monthly limit.
 name: Update papers
 
 on:
   schedule:
-    - cron: "30 6 * * *"  # daily 06:30 UTC, after arXiv's overnight announcement
+    - cron: "30 6 * * *"  # daily 06:30 UTC: after arXiv's announcement; OpenAlex budget reset at 00:00 UTC
   workflow_dispatch:
     inputs:
       since:
@@ -44,21 +52,43 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           if [ -z "$DATABASE_URL" ]; then
-            echo "::error::Add the DATABASE_URL repository secret (Render External Database URL) first."
+            echo "::error::Add the DATABASE_URL repository secret (your Neon connection string) first."
             exit 1
           fi
-      - name: Import new papers and affiliations
+      - name: Import new arXiv papers and backfill older weeks
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          AFFILIATION_SOURCES: pdf
-          AFFILIATION_DAILY_LIMIT: ${{ vars.AFFILIATION_DAILY_LIMIT || '300' }}
+          DB_STORAGE_LIMIT_MB: ${{ vars.DB_STORAGE_LIMIT_MB || '900' }}
+          ARXIV_BACKFILL_PAGES: ${{ vars.ARXIV_BACKFILL_PAGES || '10' }}
           SINCE: ${{ github.event.inputs.since }}
         run: |
           if [ -n "$SINCE" ]; then
-            python -m backend.update_papers --since "$SINCE"
+            python -m backend.update_papers --since "$SINCE" --no-affiliations
           else
-            python -m backend.update_papers
+            python -m backend.update_papers --no-affiliations
           fi
+
+      - name: Import OpenAlex papers (as many as today's free budget allows)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          OPENALEX_API_KEY: ${{ secrets.OPENALEX_API_KEY }}
+          OPENALEX_DAILY_MAX: ${{ vars.OPENALEX_DAILY_MAX || '20000' }}
+          OPENALEX_MINUTES: ${{ vars.OPENALEX_MINUTES || '20' }}
+          DB_STORAGE_LIMIT_MB: ${{ vars.DB_STORAGE_LIMIT_MB || '900' }}
+        run: |
+          if [ -z "$OPENALEX_API_KEY" ]; then
+            echo "::notice::Skipping OpenAlex: add the OPENALEX_API_KEY secret to import OpenAlex papers."
+            exit 0
+          fi
+          python -m backend.openalex_import
+
+      - name: Affiliations for new arXiv papers
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          OPENALEX_API_KEY: ${{ secrets.OPENALEX_API_KEY }}
+          AFFILIATION_SOURCES: ${{ secrets.OPENALEX_API_KEY != '' && 'openalex+pdf' || 'pdf' }}
+          AFFILIATION_DAILY_LIMIT: ${{ vars.AFFILIATION_DAILY_LIMIT || '300' }}
+        run: python -m backend.update_papers --affiliations-only
 
       - name: Cache the free models
         uses: actions/cache@v4

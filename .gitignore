@@ -29,3 +29,9 @@ backup-*/
 # beside it.
 /.plugins/
 /.opencode-skills/
+
+# Assistant training outputs (rebuild with python -m training.build_dataset)
+/training/data/
+/outputs/
+*.gguf
+*.dump

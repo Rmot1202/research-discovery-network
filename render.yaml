@@ -1,6 +1,9 @@
 # Render Blueprint: Dashboard -> New -> Blueprint -> pick this repo.
-# Creates the web app (API + website in one Docker service) and a PostgreSQL database.
-# New papers arrive daily via .github/workflows/update-papers.yml (needs the DATABASE_URL secret).
+# Creates the web app (API + website in one Docker service). The database is NOT on Render:
+# free Render Postgres expires 30 days after creation and is deleted 14 days later, so the data
+# lives on Neon's free plan instead (1 GB, no expiry). Paste the Neon connection string into
+# DATABASE_URL below and into the GitHub secret DATABASE_URL.
+# New papers arrive daily via .github/workflows/update-papers.yml.
 services:
   - type: web
     name: research-discovery-network
@@ -12,11 +15,17 @@ services:
       - key: PUBLISH_MODE
         value: auto           # auto: new papers go public right away; review: only approved papers are featured
       - key: DATABASE_URL
-        fromDatabase:
-          name: research-discovery-db
-          property: connectionString
+        sync: false           # Neon connection string (postgresql://...neon.tech/...?sslmode=require)
+      - key: FIREBASE_PROJECT_ID
+        sync: false           # Firebase console -> Project settings -> Project ID
+      - key: FIREBASE_WEB_API_KEY
+        sync: false           # Firebase console -> Project settings -> Web API key (public, not a secret)
+      - key: FIREBASE_AUTH_DOMAIN
+        sync: false           # optional; defaults to <project-id>.firebaseapp.com
+      - key: ADMIN_EMAILS
+        sync: false           # comma-separated Google accounts allowed into Admin
       - key: ADMIN_API_TOKEN
-        generateValue: true   # copy it from the service's Environment tab to log in to Admin review
+        generateValue: true   # fallback login and for scripts; Firebase sign-in is the normal way in
       - key: AI_BASE_URL
         sync: false           # optional: any OpenAI-compatible provider for the assistant
       - key: AI_API_KEY
@@ -28,8 +37,3 @@ services:
       - key: OPENALEX_API_KEY
         sync: false           # optional: larger daily budget for the paper scan
 
-databases:
-  - name: research-discovery-db
-    plan: free              # free Render Postgres expires after 30 days; basic-256mb keeps it
-    databaseName: research_discovery
-    user: research

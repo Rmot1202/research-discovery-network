@@ -350,7 +350,7 @@ _AFTER_CURSOR = (
 def _next_batch(engine: Engine, cursor: str, size: int) -> list[tuple[str, str]]:
     """Newest published papers first (they are the most likely to have readable affiliations).
     Returns (arxiv_id, cursor) pairs."""
-    query = "SELECT arxiv_id, COALESCE(published_at, '') FROM papers WHERE institution IS NULL"
+    query = "SELECT arxiv_id, COALESCE(published_at, '') FROM papers WHERE institution IS NULL AND arxiv_id NOT LIKE 'W%'"
     params: dict[str, Any] = {"n": size}
     position = _split_cursor(cursor)
     if position:
@@ -362,7 +362,7 @@ def _next_batch(engine: Engine, cursor: str, size: int) -> list[tuple[str, str]]
 
 
 def _remaining(engine: Engine, cursor: str) -> int:
-    query = "SELECT COUNT(*) FROM papers WHERE institution IS NULL"
+    query = "SELECT COUNT(*) FROM papers WHERE institution IS NULL AND arxiv_id NOT LIKE 'W%'"
     params: dict[str, Any] = {}
     position = _split_cursor(cursor)
     if position:

@@ -1,6 +1,8 @@
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import type {
   AdminOverview,
+  AdminToday,
   AffiliationDraft,
   AffiliationSuggestion,
   IngestProgress,
@@ -8,6 +10,8 @@ import type {
   PaperDraft,
 } from '../types'
 import AffiliationScanPanel from './AffiliationScanPanel'
+import { FIREBASE_SESSION, currentUser, getAuthConfig, signInWithGoogle } from '../auth'
+import type { AuthConfig } from '../auth'
 import { ArrowIcon } from './Icons'
 import { DiscoveryBreakdown } from './DiscoveryScore'
 
@@ -17,6 +21,13 @@ type AdminDashboardProps = {
   tokenInput: string
   overview: AdminOverview | null
   papers: Paper[]
+  papersTotal: number
+  today: AdminToday | null
+  day: string
+  source: '' | 'arxiv' | 'openalex'
+  onDayChange: (day: string) => void
+  onSourceChange: (source: '' | 'arxiv' | 'openalex') => void
+  onLogout: () => void
   error: string
   notice: string
   busyId: string
@@ -44,13 +55,38 @@ type AdminDashboardProps = {
 
 export default function AdminDashboard(props: AdminDashboardProps) {
   const {
-    isOpen, token, tokenInput, overview, papers, error, notice, busyId, analysisBusy,
+    isOpen, token, tokenInput, overview, papers, papersTotal, today, day, source,
+    onDayChange, onSourceChange, onLogout, error, notice, busyId, analysisBusy,
     drafts, affiliationDrafts, affiliationSuggestions, ingestProgress, isStartingIngest,
     onClose, onTokenInputChange, onLogin, onStartIngest, onPauseIngest, onAnalyze,
     onGenerateSummary, onUpdateReview, onSaveAffiliation, onExtractAffiliation,
     onPaperDraftChange, onAffiliationDraftChange, onUseAffiliationSuggestion, onAffiliationsChanged,
   } = props
+  const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null)
+  const [signingIn, setSigningIn] = useState(false)
+  const [signInError, setSignInError] = useState('')
+  useEffect(() => {
+    if (!isOpen || authConfig) return
+    getAuthConfig().then(async (config) => {
+      setAuthConfig(config)
+      // Already signed in with Firebase on this browser? Open the dashboard straight away.
+      if (config.firebase && !token && (await currentUser())) onLogin(FIREBASE_SESSION)
+    }).catch(() => setAuthConfig({ firebase: null, token_login: true }))
+  }, [isOpen, authConfig, token, onLogin])
   if (!isOpen) return null
+
+  const googleSignIn = async () => {
+    setSigningIn(true)
+    setSignInError('')
+    try {
+      await signInWithGoogle()
+      onLogin(FIREBASE_SESSION)
+    } catch (signInFailure) {
+      setSignInError(signInFailure instanceof Error ? signInFailure.message : 'Google sign-in failed.')
+    } finally {
+      setSigningIn(false)
+    }
+  }
 
   const login = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -64,37 +100,88 @@ export default function AdminDashboard(props: AdminDashboardProps) {
         <button className="admin-close" onClick={onClose}>Close dashboard</button>
       </div>
       {!token ? (
-        <form className="admin-login" onSubmit={login}>
-          <label>Admin access token<input type="password" autoComplete="current-password" value={tokenInput} onChange={(event) => onTokenInputChange(event.target.value)} placeholder="Token from your local ADMIN_API_TOKEN setting" /></label>
-          <button className="primary" type="submit" disabled={!tokenInput}>Open review queue <ArrowIcon /></button>
-        </form>
+        <div className="admin-login-options">
+          {authConfig?.firebase && (
+            <div className="admin-login">
+              <button className="primary" onClick={() => void googleSignIn()} disabled={signingIn}>
+                {signingIn ? 'Signing in…' : 'Sign in with Google'} <ArrowIcon />
+              </button>
+              <p>Only accounts on the admin list can open the dashboard.</p>
+              {signInError && <p className="admin-error" role="alert">{signInError}</p>}
+            </div>
+          )}
+          {(authConfig?.token_login ?? true) && (
+            <details className="affiliation-editor" open={!authConfig?.firebase}>
+              <summary>{authConfig?.firebase ? 'Use the admin token instead' : 'Admin access token'}</summary>
+              <form className="admin-login" onSubmit={login}>
+                <label>Admin access token<input type="password" autoComplete="current-password" value={tokenInput} onChange={(event) => onTokenInputChange(event.target.value)} placeholder="ADMIN_API_TOKEN from the Render environment" /></label>
+                <button className="primary" type="submit" disabled={!tokenInput}>Open review queue <ArrowIcon /></button>
+              </form>
+            </details>
+          )}
+        </div>
       ) : (
         <>
+          <div className="analysis-controls">
+            <div>
+              <strong>Papers loaded {day ? `on ${day}` : 'today'}</strong>
+              <p>
+                {today ? `${today.loaded.toLocaleString()} new papers · arXiv ${today.by_source.arxiv.toLocaleString()} · OpenAlex ${today.by_source.openalex.toLocaleString()}` : 'Loading…'}
+                {today?.database_mb != null ? ` · database ${today.database_mb.toLocaleString()} MB of ${today.storage_limit_mb.toLocaleString()} MB` : ''}
+              </p>
+            </div>
+            <label>Day<input type="date" value={day} onChange={(event) => onDayChange(event.target.value)} /></label>
+            <label>Source
+              <select value={source} onChange={(event) => onSourceChange(event.target.value as '' | 'arxiv' | 'openalex')}>
+                <option value="">All</option><option value="arxiv">arXiv</option><option value="openalex">OpenAlex</option>
+              </select>
+            </label>
+            {day && <button className="admin-close" onClick={() => onDayChange('')}>Back to today</button>}
+            <button className="admin-close" onClick={onLogout}>Sign out</button>
+          </div>
+          {!!today?.runs.length && (
+            <details className="affiliation-editor">
+              <summary>Scheduled import runs ({today.runs.length})</summary>
+              <ul className="import-runs">
+                {today.runs.map((run) => (
+                  <li key={`${run.source}-${run.finished_at}`}>
+                    <strong>{run.source === 'openalex' ? 'OpenAlex' : 'arXiv'}</strong> · {new Date(run.finished_at).toLocaleTimeString()} · {run.inserted.toLocaleString()} new
+                    {typeof run.details.stopped === 'string' ? ` · stopped: ${run.details.stopped.replace(/_/g, ' ')}` : ''}
+                    {typeof run.details.credits_used === 'number' ? ` · ${run.details.credits_used.toLocaleString()} OpenAlex credits` : ''}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
           {overview && (
             <div className="admin-stats">
+              <span><strong>{overview.total.toLocaleString()}</strong> papers in archive</span>
               <span><strong>{overview.pending.toLocaleString()}</strong> pending</span>
               <span><strong>{overview.approved.toLocaleString()}</strong> {overview.publish_mode === 'auto' ? 'featured (auto-publish on)' : 'approved'}</span>
               <span><strong>{overview.embedded.toLocaleString()}</strong> embedded</span>
               <span><strong>{overview.documented_institutions.toLocaleString()}</strong> documented institutions</span>
-              <span><strong>{overview.documented_countries.toLocaleString()}</strong> documented countries</span>
             </div>
           )}
-          <div className="analysis-controls">
-            <div><strong>Archive ingestion</strong><p>{ingestProgress?.records_processed.toLocaleString() ?? '0'} records scanned · {ingestProgress?.ingested_papers.toLocaleString() ?? '0'} unique papers saved · Status: {ingestProgress?.status ?? 'unknown'}{ingestProgress?.error ? ` · ${ingestProgress.error}` : ''}</p></div>
-            {ingestProgress?.status !== 'complete' && (
-              <button className="primary" onClick={onStartIngest} disabled={isStartingIngest || ingestProgress?.status === 'running'}>
-                {isStartingIngest ? 'Starting…' : ingestProgress?.status === 'running' ? 'Import running' : ingestProgress?.status === 'error' || ingestProgress?.status === 'paused' ? 'Resume from saved cursor' : 'Ingest all arXiv CS papers'}
+          <details className="affiliation-editor">
+            <summary>Manual tools (imports now run automatically every day)</summary>
+            <div className="analysis-controls">
+              <div><strong>Archive ingestion</strong><p>{ingestProgress?.records_processed.toLocaleString() ?? '0'} records scanned · {ingestProgress?.ingested_papers.toLocaleString() ?? '0'} unique papers saved · Status: {ingestProgress?.status ?? 'unknown'}{ingestProgress?.error ? ` · ${ingestProgress.error}` : ''}</p></div>
+              {ingestProgress?.status !== 'complete' && (
+                <button className="primary" onClick={onStartIngest} disabled={isStartingIngest || ingestProgress?.status === 'running'}>
+                  {isStartingIngest ? 'Starting…' : ingestProgress?.status === 'running' ? 'Import running' : ingestProgress?.status === 'error' || ingestProgress?.status === 'paused' ? 'Resume from saved cursor' : 'Ingest all arXiv CS papers'}
+                </button>
+              )}
+              {ingestProgress?.status === 'running' && <button className="admin-close" onClick={onPauseIngest}>Pause import</button>}
+            </div>
+            <div className="analysis-controls">
+              <div><strong>AI analysis</strong><p>{overview?.ai_configured ? 'Provider configured. Embedding and clustering are available.' : 'Configure the AI provider, chat model, and embedding model in your local environment to enable AI.'}</p></div>
+              <button className="primary" onClick={onAnalyze} disabled={analysisBusy || !overview?.ai_configured}>
+                {analysisBusy ? 'Embedding and clustering…' : 'Analyze next 20 papers'}
               </button>
-            )}
-            {ingestProgress?.status === 'running' && <button className="admin-close" onClick={onPauseIngest}>Pause import</button>}
-          </div>
-          <div className="analysis-controls">
-            <div><strong>AI analysis</strong><p>{overview?.ai_configured ? 'Provider configured. Embedding and clustering are available.' : 'Configure the AI provider, chat model, and embedding model in your local environment to enable AI.'}</p></div>
-            <button className="primary" onClick={onAnalyze} disabled={analysisBusy || !overview?.ai_configured}>
-              {analysisBusy ? 'Embedding and clustering…' : 'Analyze next 20 papers'}
-            </button>
-          </div>
+            </div>
           <AffiliationScanPanel token={token} onFound={onAffiliationsChanged} />
+          </details>
+          <p className="admin-queue-count">Showing {papers.length.toLocaleString()} of {papersTotal.toLocaleString()} papers loaded {day ? `on ${day}` : 'today'}.</p>
           {notice && <p className="admin-notice" role="status">{notice}</p>}
           {error && <p className="admin-error" role="alert">{error}</p>}
           <div className="admin-queue">
@@ -105,7 +192,7 @@ export default function AdminDashboard(props: AdminDashboardProps) {
               return (
                 <article className="admin-paper" key={paper.arxiv_id}>
                   <div className="admin-paper-heading">
-                    <div><span>{paper.topic} · {paper.arxiv_id}</span><h3>{paper.title}</h3><p>{paper.authors.join(' · ')} · {paper.published_at.slice(0, 4)}</p></div>
+                    <div><span>{paper.topic} · {paper.source === 'openalex' ? `OpenAlex ${paper.arxiv_id}${paper.venue ? ` · ${paper.venue}` : ''}` : `arXiv ${paper.arxiv_id}`}</span><h3>{paper.title}</h3><p>{paper.authors.join(' · ')} · {paper.published_at.slice(0, 4)}</p></div>
                     <strong>{paper.discovery_score === null ? '—' : paper.discovery_score.toFixed(1)}<small> Discovery Score</small></strong>
                   </div>
                   <p className="admin-abstract">{paper.abstract}</p>
@@ -159,7 +246,7 @@ export default function AdminDashboard(props: AdminDashboardProps) {
                 </article>
               )
             })}
-            {!papers.length && <p className="featured-empty">The review queue is empty.</p>}
+            {!papers.length && <p className="featured-empty">No papers were loaded {day ? `on ${day}` : 'today yet'}. The daily import runs at 06:30 UTC.</p>}
           </div>
         </>
       )}

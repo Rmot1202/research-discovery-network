@@ -10,9 +10,16 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
   return result as T
 }
 
-export function adminRequest<T>(token: string, path: string, init?: RequestInit): Promise<T> {
+// `token` is either the admin token typed into the form or FIREBASE_SESSION, in which case a
+// fresh Firebase ID token is fetched for every request (they expire after an hour).
+export async function adminRequest<T>(token: string, path: string, init?: RequestInit): Promise<T> {
+  let bearer = token
+  if (token === 'firebase-session') {
+    const { firebaseIdToken } = await import('./auth')
+    bearer = await firebaseIdToken()
+  }
   return apiRequest<T>(path, {
     ...init,
-    headers: { ...init?.headers, Authorization: `Bearer ${token}` },
+    headers: { ...init?.headers, Authorization: `Bearer ${bearer}` },
   })
 }

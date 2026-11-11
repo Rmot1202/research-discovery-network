@@ -27,7 +27,7 @@ from backend.paper_queries import (
 from backend.paper_chat import (
     ai_chat_configured, answer_question, collection_stats, ensure_search_index, retrieve_papers,
 )
-from backend import affiliation_scan, analysis_pipeline, discovery_score, subtopics
+from backend import affiliation_scan, analysis_pipeline, discovery_score, import_log, subtopics
 from backend.discovery_score import DiscoveryIndex
 from backend.research_gaps import gap_summary_for_chat, idea_gap_report, invalidate_cache, topic_gap_report
 from backend.schemas import ChatRequest, DocumentedAffiliation, ReviewUpdate
@@ -125,6 +125,7 @@ def init_db() -> None:
             """
         )
     analysis_pipeline.ensure_tables(ENGINE)
+    import_log.ensure_paper_columns(ENGINE)
     migrate_legacy_json()
 
 
@@ -275,11 +276,13 @@ def parse_feed(feed: bytes) -> tuple[list[dict[str, Any]], str | None, int]:
 
 
 def fetch_oai_page(
-    token: str | None, from_date: str | None = None,
+    token: str | None, from_date: str | None = None, until_date: str | None = None,
 ) -> tuple[list[dict[str, Any]], str | None, int]:
     params = {"verb": "ListRecords", "metadataPrefix": "arXiv", "set": "cs"}
     if from_date:  # incremental harvest: records added or changed on/after this day (YYYY-MM-DD)
         params["from"] = from_date
+    if until_date:  # backfill windows: records stamped on/before this day
+        params["until"] = until_date
     if token:
         params = {"verb": "ListRecords", "resumptionToken": token}
     request = urllib.request.Request(
@@ -289,7 +292,7 @@ def fetch_oai_page(
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
             body = response.read()
-        if from_date and not token and b"noRecordsMatch" in body:
+        if (from_date or until_date) and not token and b"noRecordsMatch" in body:
             return [], None, 0
         return parse_feed(body)
     except (OSError, ET.ParseError, ValueError) as error:
@@ -298,6 +301,7 @@ def fetch_oai_page(
 
 def insert_papers(papers: list[dict[str, Any]]) -> int:
     inserted = 0
+    loaded_at = datetime.now(UTC).isoformat(timespec="seconds")  # shown as "loaded today" in Admin
     with connect_db() as connection:
         for paper in papers:
             category = paper["primary_category"]
@@ -313,8 +317,9 @@ def insert_papers(papers: list[dict[str, Any]]) -> int:
                 """
                 INSERT OR IGNORE INTO papers (
                     arxiv_id, raw_metadata, analysis, primary_category, title,
-                    abstract, authors, institution, country, published_at, approval_status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                    abstract, authors, institution, country, published_at, approval_status,
+                    source, ingested_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
                 """,
                 (
                     paper["arxiv_id"],
@@ -327,6 +332,8 @@ def insert_papers(papers: list[dict[str, Any]]) -> int:
                     None,
                     None,
                     paper["published_at"],
+                    paper.get("source") or "arxiv",
+                    loaded_at,
                 ),
             )
             inserted += cursor.rowcount
@@ -798,38 +805,102 @@ def admin_overview(authorization: str | None = Header(default=None)) -> dict[str
     }
 
 
+def loaded_day_window(day: str | None, tz_offset_minutes: int) -> tuple[str, str, str]:
+    """UTC [start, end) of one calendar day in the admin's own time zone.
+
+    tz_offset_minutes follows JavaScript's Date.getTimezoneOffset(): minutes to *add* to local
+    time to get UTC (New York in winter = 300)."""
+    from datetime import date as _date, timedelta
+
+    offset = timedelta(minutes=tz_offset_minutes)
+    if day:
+        try:
+            local_day = _date.fromisoformat(day)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail="day must be YYYY-MM-DD.") from error
+    else:
+        local_day = (datetime.now(UTC) - offset).date()
+    start = datetime(local_day.year, local_day.month, local_day.day, tzinfo=UTC) + offset
+    end = start + timedelta(days=1)
+    return local_day.isoformat(), start.isoformat(timespec="seconds"), end.isoformat(timespec="seconds")
+
+
 @app.get("/api/admin/reviews")
 def admin_review_queue(
     limit: int = Query(default=30, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     authorization: str | None = Header(default=None),
     weights: str | None = Query(default=None, max_length=120),
+    day: str | None = Query(default=None, max_length=10),
+    tz_offset_minutes: int = Query(default=0, ge=-840, le=840),
+    source: str | None = Query(default=None, pattern="^(arxiv|openalex)$"),
+    status: str | None = Query(default=None, pattern="^(pending|approved|rejected)$"),
 ) -> dict[str, Any]:
+    """Papers loaded on one day (default: today in the admin's time zone), newest load first."""
     require_admin(authorization)
     weight_map = read_weights(weights)
-    rows, index, total = read_paper_rows(
-        query="",
-        category=None,
-        country=None,
-        institution=None,
-        year=None,
-        sort="score",
-        limit=limit,
-        offset=offset,
-        approval_status="pending",
-        weights=weight_map,
-    )
+    shown_day, start, end = loaded_day_window(day, tz_offset_minutes)
+    where = "ingested_at >= ? AND ingested_at < ?"
+    values: list[Any] = [start, end]
+    if source:
+        where += " AND COALESCE(source, 'arxiv') = ?"
+        values.append(source)
+    if status:
+        where += " AND approval_status = ?"
+        values.append(status)
     with connect_db() as connection:
-        all_count = connection.execute("SELECT COUNT(*) FROM papers").fetchone()[0]
-    papers = [
-        serialize_paper(row, index, weight_map)
-        for row in rows
-    ]
+        total = connection.execute(f"SELECT COUNT(*) FROM papers WHERE {where}", values).fetchone()[0]
+        rows = connection.execute(
+            f"SELECT * FROM papers WHERE {where} ORDER BY ingested_at DESC, arxiv_id DESC LIMIT ? OFFSET ?",
+            [*values, limit, offset],
+        ).fetchall()
+    index = discovery_score.load_index(ENGINE)
+    papers = [serialize_paper(row, index, weight_map) for row in rows]
+    return {"day": shown_day, "total": total, "limit": limit, "offset": offset, "papers": papers}
+
+
+@app.get("/api/admin/today")
+def admin_loaded_today(
+    authorization: str | None = Header(default=None),
+    day: str | None = Query(default=None, max_length=10),
+    tz_offset_minutes: int = Query(default=0, ge=-840, le=840),
+) -> dict[str, Any]:
+    """What the scheduled importers added on one day, by source, plus their run log."""
+    require_admin(authorization)
+    shown_day, start, end = loaded_day_window(day, tz_offset_minutes)
+    with connect_db() as connection:
+        by_source = {
+            row["source"]: row["count"]
+            for row in connection.execute(
+                "SELECT COALESCE(source, 'arxiv') AS source, COUNT(*) AS count FROM papers "
+                "WHERE ingested_at >= ? AND ingested_at < ? GROUP BY COALESCE(source, 'arxiv')",
+                (start, end),
+            )
+        }
+    runs = [run for run in import_log.recent_runs(ENGINE, start, limit=50) if run["finished_at"] < end]
     return {
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-        "papers": papers,
+        "day": shown_day,
+        "loaded": sum(by_source.values()),
+        "by_source": {"arxiv": by_source.get("arxiv", 0), "openalex": by_source.get("openalex", 0)},
+        "runs": runs,
+        "database_mb": import_log.database_size_mb(ENGINE),
+        "storage_limit_mb": import_log.storage_limit_mb(),
+    }
+
+
+@app.get("/api/auth/config")
+def auth_config() -> dict[str, Any]:
+    """Public Firebase web settings (not secrets) so the site can show "Sign in with Google"."""
+    from backend.security import firebase_project_id
+
+    project_id = firebase_project_id()
+    return {
+        "firebase": {
+            "apiKey": os.environ.get("FIREBASE_WEB_API_KEY", ""),
+            "authDomain": os.environ.get("FIREBASE_AUTH_DOMAIN") or (f"{project_id}.firebaseapp.com" if project_id else ""),
+            "projectId": project_id,
+        } if project_id and os.environ.get("FIREBASE_WEB_API_KEY") else None,
+        "token_login": bool(os.environ.get("ADMIN_API_TOKEN")),
     }
 
 

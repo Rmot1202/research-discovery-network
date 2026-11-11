@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from backend.arxiv_utils import abs_url, pdf_url
+from backend.arxiv_utils import abs_url, is_openalex_id, pdf_url
 from backend.discovery_score import DiscoveryIndex, ranked_ids, score_paper
 from backend.taxonomy import CATEGORIES, CATEGORY_CODES, CATEGORY_LABELS
 
@@ -129,11 +129,17 @@ def serialize_paper(
     analysis["discovery_score"] = discovery["discovery_score"]
     analysis["discovery"] = discovery
     analysis["approval_status"] = row["approval_status"]
+    source = row["source"] if "source" in row._mapping else None
+    is_openalex = source == "openalex" or is_openalex_id(row["arxiv_id"])
     return {
         **raw,
         **analysis,
-        "url": abs_url(row["arxiv_id"], raw.get("categories"), row["primary_category"]),
-        "pdf_url": pdf_url(row["arxiv_id"], raw.get("categories"), row["primary_category"]),
+        "source": "openalex" if is_openalex else "arxiv",
+        "ingested_at": row["ingested_at"] if "ingested_at" in row._mapping else None,
+        "url": (raw.get("url") if is_openalex and raw.get("url") else
+                abs_url(row["arxiv_id"], raw.get("categories"), row["primary_category"])),
+        "pdf_url": (raw.get("pdf_url") or raw.get("url") or abs_url(row["arxiv_id"])) if is_openalex else
+        pdf_url(row["arxiv_id"], raw.get("categories"), row["primary_category"]),
         "institution": row["institution"],
         "country": row["country"],
         "topic": CATEGORY_LABELS.get(row["primary_category"], row["primary_category"]),
