@@ -2,13 +2,16 @@
 # One-time move of the paper database from Render Postgres (expires) to Neon (free, no expiry).
 #
 #   1. Create a free Neon project at https://neon.com (pick a US East region near Render's).
-#   2. Copy its connection string (Dashboard -> Connect -> "Connection string").
+#   2. Copy its DIRECT connection string (Dashboard -> Connect, turn "Connection pooling" off;
+#      the host has no "-pooler"). Or after `neon deploy`, use DATABASE_URL_UNPOOLED from .env.local.
+#      pg_restore needs the direct string; the app itself uses the pooled DATABASE_URL.
 #   3. Copy the Render database's "External Database URL".
 #   4. Run:
 #        RENDER_URL='postgresql://...render.com/research_discovery' \
 #        NEON_URL='postgresql://...neon.tech/neondb?sslmode=require' \
 #        bash scripts/move_db_to_neon.sh
-#   5. Put NEON_URL in Render's DATABASE_URL and in the GitHub secret DATABASE_URL.
+#   5. Put the POOLED string (DATABASE_URL, "-pooler" host) in Render's DATABASE_URL and in the
+#      GitHub secret DATABASE_URL.
 #
 # Needs pg_dump/pg_restore 16+ (macOS: brew install libpq && brew link --force libpq).
 set -euo pipefail

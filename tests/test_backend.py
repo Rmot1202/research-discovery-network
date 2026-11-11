@@ -1,3 +1,12 @@
+# Tests always use a throwaway SQLite file, never the DATABASE_URL in your shell (it could be Neon).
+import os as _os
+import tempfile as _tempfile
+
+_os.environ["RDN_SKIP_ENV_FILES"] = "1"  # never read .env.local (Neon) during tests
+_os.environ.pop("DATABASE_URL", None)
+_os.environ.pop("DATABASE_URL_UNPOOLED", None)
+_os.environ["PAPERS_DB"] = _os.path.join(_tempfile.mkdtemp(), "papers.sqlite3")
+
 import asyncio
 import json
 import os
@@ -307,16 +316,18 @@ class ReviewWorkflowTests(unittest.TestCase):
             ReviewUpdate(approval_status="approved", summary="A reviewed plain-language summary."),
             "Bearer test-token",
         )
-        result = main.list_featured_papers(
-            limit=12,
-            offset=0,
-            q="",
-            category=None,
-            country=None,
-            institution=None,
-            year=None,
-            sort="newest",
-        )
+        # Pin review mode: PUBLISH_MODE=auto in your shell (e.g. from .env) must not change this test.
+        with patch.object(main, "PUBLISH_MODE", "review"):
+            result = main.list_featured_papers(
+                limit=12,
+                offset=0,
+                q="",
+                category=None,
+                country=None,
+                institution=None,
+                year=None,
+                sort="newest",
+            )
         self.assertEqual(result["total"], 1)
         self.assertEqual(result["papers"][0]["arxiv_id"], "2601.00001")
         self.assertEqual(result["papers"][0]["summary"], "A reviewed plain-language summary.")

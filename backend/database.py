@@ -10,9 +10,20 @@ from typing import Any
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine
 
+from backend.env_files import load_env_files
 
-def database_url() -> str:
-    configured = os.environ.get("DATABASE_URL")
+load_env_files()
+
+
+def database_url(*, direct: bool = False) -> str:
+    """SQLAlchemy URL for the paper database.
+
+    Neon gives two strings (`neon env pull` writes both): DATABASE_URL is the pooled one
+    (`-pooler` host, PgBouncer) for the web app and the daily import; DATABASE_URL_UNPOOLED is
+    the direct one for bulk copies, dumps and migrations. `direct=True` prefers the direct
+    string and falls back to DATABASE_URL. Without either, a local SQLite file is used.
+    """
+    configured = (os.environ.get("DATABASE_URL_UNPOOLED") if direct else None) or os.environ.get("DATABASE_URL")
     if configured:
         if configured.startswith("postgres://"):
             return configured.replace("postgres://", "postgresql+psycopg://", 1)
@@ -23,11 +34,15 @@ def database_url() -> str:
     return f"sqlite:///{path.resolve()}"
 
 
-def create_database_engine(url: str | None = None) -> Engine:
-    resolved = url or database_url()
+def create_database_engine(url: str | None = None, *, direct: bool = False) -> Engine:
+    resolved = url or database_url(direct=direct)
     options: dict[str, Any] = {"pool_pre_ping": True}
     if resolved.startswith("sqlite:"):
         options["connect_args"] = {"check_same_thread": False, "timeout": 30}
+    else:
+        # Neon suspends idle compute (scale to zero) and drops its connections; recycle
+        # pooled connections before that and let pre-ping replace any that went stale.
+        options["pool_recycle"] = 240
     return create_engine(resolved, **options)
 
 
