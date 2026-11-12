@@ -56,12 +56,18 @@ export type RelatedPaper = Paper & {
   sharedTerms: string[]
 }
 export type IngestProgress = {
-  status: 'not_started' | 'running' | 'paused' | 'complete' | 'error'
+  status: 'not_started' | 'running' | 'paused' | 'complete' | 'error' | 'retired'
   total_records: number
   records_processed: number
   pages_processed: number
   ingested_papers: number
   error: string | null
+  daily?: DailyUpdate | null
+}
+export type DailyUpdate = {
+  last_run_at: string
+  new_papers: number
+  backfill_until: string | null
 }
 export type AdminOverview = {
   total: number

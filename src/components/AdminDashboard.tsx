@@ -165,8 +165,10 @@ export default function AdminDashboard(props: AdminDashboardProps) {
           <details className="affiliation-editor">
             <summary>Manual tools (imports now run automatically every day)</summary>
             <div className="analysis-controls">
-              <div><strong>Archive ingestion</strong><p>{ingestProgress?.records_processed.toLocaleString() ?? '0'} records scanned · {ingestProgress?.ingested_papers.toLocaleString() ?? '0'} unique papers saved · Status: {ingestProgress?.status ?? 'unknown'}{ingestProgress?.error ? ` · ${ingestProgress.error}` : ''}</p></div>
-              {ingestProgress?.status !== 'complete' && (
+              <div><strong>Archive ingestion</strong><p>{ingestProgress?.status === 'retired'
+                ? `The one-time full import (${ingestProgress.ingested_papers.toLocaleString()} papers) was replaced by the daily job, which also fills in older weeks.${ingestProgress.daily ? ` Last daily run ${new Date(ingestProgress.daily.last_run_at).toLocaleString()}: ${ingestProgress.daily.new_papers.toLocaleString()} new papers${ingestProgress.daily.backfill_until ? `, older weeks done back to ${ingestProgress.daily.backfill_until}` : ''}.` : ''}`
+                : `${ingestProgress?.records_processed.toLocaleString() ?? '0'} records scanned · ${ingestProgress?.ingested_papers.toLocaleString() ?? '0'} unique papers saved · Status: ${ingestProgress?.status ?? 'unknown'}${ingestProgress?.error ? ` · ${ingestProgress.error}` : ''}`}</p></div>
+              {ingestProgress?.status !== 'complete' && ingestProgress?.status !== 'retired' && (
                 <button className="primary" onClick={onStartIngest} disabled={isStartingIngest || ingestProgress?.status === 'running'}>
                   {isStartingIngest ? 'Starting…' : ingestProgress?.status === 'running' ? 'Import running' : ingestProgress?.status === 'error' || ingestProgress?.status === 'paused' ? 'Resume from saved cursor' : 'Ingest all arXiv CS papers'}
                 </button>

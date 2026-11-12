@@ -520,13 +520,16 @@ export default function App() {
             <span><strong>{topics.length}</strong> arXiv CS topics</span>
           </div>
           <div className="full-ingest">
-            <p>Archive import uses resumable OAI-PMH paging · controls are in the admin dashboard</p>
-            {ingestProgress && ingestProgress.status !== 'not_started' && (
+            {ingestProgress?.status === 'running' ? (
               <div className="ingest-progress">
-                <div><strong>{progressPercent === null ? ingestProgress.status : `${progressPercent}%`}</strong> · {ingestProgress.pages_processed.toLocaleString()} pages processed</div>
+                <div><strong>{progressPercent === null ? 'Importing' : `${progressPercent}%`}</strong> · {ingestProgress.pages_processed.toLocaleString()} pages processed</div>
                 <div className={`progress-track ${progressPercent === null ? 'indeterminate' : ''}`}><i style={progressPercent === null ? undefined : { width: `${progressPercent}%` }} /></div>
-                <small>{ingestProgress.records_processed.toLocaleString()} archive records scanned · {ingestProgress.ingested_papers.toLocaleString()} unique papers saved{ingestProgress.total_records ? ` · ${ingestProgress.total_records.toLocaleString()} records total` : ''}{ingestProgress.status === 'error' ? ` · ${ingestProgress.error}` : ''}</small>
+                <small>{ingestProgress.records_processed.toLocaleString()} archive records scanned · {ingestProgress.ingested_papers.toLocaleString()} unique papers saved{ingestProgress.total_records ? ` · ${ingestProgress.total_records.toLocaleString()} records total` : ''}</small>
               </div>
+            ) : ingestProgress?.daily ? (
+              <p>Updated daily from arXiv · last update {new Date(ingestProgress.daily.last_run_at).toLocaleDateString()} · {ingestProgress.daily.new_papers.toLocaleString()} new papers</p>
+            ) : (
+              <p>New arXiv papers are imported automatically every day</p>
             )}
           </div>
         </div>

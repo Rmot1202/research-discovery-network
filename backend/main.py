@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 import unicodedata
 import urllib.parse
 import urllib.request
@@ -46,6 +47,9 @@ ARXIV_OAI = "https://oaipmh.arxiv.org/oai"
 OAI = "{http://www.openarchives.org/OAI/2.0/}"
 ARXIV_METADATA = "{http://arxiv.org/OAI/arXiv/}"
 OAI_REQUEST_INTERVAL = 20
+OAI_TIMEOUT = 90  # seconds to wait for one arXiv page
+OAI_ATTEMPTS = 3
+OAI_RETRY_WAIT = 30  # seconds; doubles on the third try
 # "review": only editor-approved papers are public (URD spec default).
 # "auto": every paper that isn't rejected is public right away; approving just features it.
 PUBLISH_MODE = "auto" if os.environ.get("PUBLISH_MODE", "review").strip().lower() == "auto" else "review"
@@ -127,6 +131,9 @@ def init_db() -> None:
                 state_json TEXT NOT NULL
             )
             """
+        )
+        connection.execute(  # written by the daily job (backend/update_papers.py)
+            "CREATE TABLE IF NOT EXISTS paper_update_state (id INTEGER PRIMARY KEY, state_json TEXT NOT NULL)"
         )
     analysis_pipeline.ensure_tables(ENGINE)
     import_log.ensure_paper_columns(ENGINE)
@@ -293,14 +300,25 @@ def fetch_oai_page(
         f"{ARXIV_OAI}?{urllib.parse.urlencode(params)}",
         headers={"User-Agent": "ResearchDiscoveryMVP/0.2 (metadata-only academic discovery prototype)"},
     )
-    try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            body = response.read()
-        if (from_date or until_date) and not token and b"noRecordsMatch" in body:
-            return [], None, 0
-        return parse_feed(body)
-    except (OSError, ET.ParseError, ValueError) as error:
-        raise RuntimeError(f"Could not retrieve arXiv Computer Science metadata: {error}") from error
+    last_error: Exception | None = None
+    for attempt in range(OAI_ATTEMPTS):
+        if attempt:  # arXiv is sometimes slow or briefly unavailable: wait, then ask again
+            time.sleep(OAI_RETRY_WAIT * attempt)
+        try:
+            with urllib.request.urlopen(request, timeout=OAI_TIMEOUT) as response:
+                body = response.read()
+        except OSError as error:  # timeouts, connection resets, HTTP 5xx / 503 Retry-After
+            last_error = error
+            continue
+        try:
+            if (from_date or until_date) and not token and b"noRecordsMatch" in body:
+                return [], None, 0
+            return parse_feed(body)
+        except (ET.ParseError, ValueError) as error:  # bad XML or an expired token: retrying won't help
+            raise RuntimeError(f"Could not retrieve arXiv Computer Science metadata: {error}") from error
+    raise RuntimeError(
+        f"Could not retrieve arXiv Computer Science metadata after {OAI_ATTEMPTS} tries: {last_error}"
+    ) from last_error
 
 
 def insert_papers(papers: list[dict[str, Any]]) -> int:
@@ -371,6 +389,37 @@ def read_ingest_state() -> dict[str, Any]:
     if not row:
         return default_ingest_state()
     return {**default_ingest_state(), **json.loads(row["state_json"])}
+
+
+def read_daily_update() -> dict[str, Any] | None:
+    """Summary of the daily GitHub job's last run (backend/update_papers.py), or None before its first run."""
+    with connect_db() as connection:
+        row = connection.execute("SELECT state_json FROM paper_update_state WHERE id = 1").fetchone()
+    if not row:
+        return None
+    state = json.loads(row["state_json"])
+    if not state.get("last_run_at"):
+        return None
+    result = state.get("last_result") or {}
+    return {
+        "last_run_at": state["last_run_at"],
+        "new_papers": int(result.get("new_papers", 0)) + int(result.get("backfill_new_papers", 0)),
+        "backfill_until": state.get("backfill_until"),
+    }
+
+
+def retire_legacy_ingest() -> dict[str, Any]:
+    """The one-off full import from the admin dashboard is replaced by the daily job's backfill.
+
+    Once the daily job has run, a stopped full import (error or paused) is marked "retired" so its
+    old error stops showing. Its saved arXiv cursor has expired by then anyway, and restarting from
+    the beginning would re-read the whole archive with no storage check.
+    """
+    state = read_ingest_state()
+    if state["status"] in {"error", "paused"} and read_daily_update():
+        state.update({"status": "retired", "error": None, "resumption_token": None})
+        write_ingest_state(state)
+    return state
 
 
 def write_ingest_state(state: dict[str, Any]) -> None:
@@ -464,6 +513,7 @@ def startup() -> None:
         state["status"] = "paused"
         state["error"] = "API restarted; resume the full import to continue from its saved cursor."
         write_ingest_state(state)
+    retire_legacy_ingest()
     import threading
 
     def build_index() -> None:
@@ -1070,7 +1120,7 @@ async def start_full_ingest(authorization: str | None = Header(default=None)) ->
             return state
         await asyncio.gather(_ingest_task, return_exceptions=True)
         state = read_ingest_state()
-    if state["status"] == "complete":
+    if state["status"] in {"complete", "retired"}:  # retired: the daily job does the backfill now
         return state
     state["status"] = "running"
     state["error"] = None
@@ -1091,7 +1141,9 @@ async def pause_full_ingest(authorization: str | None = Header(default=None)) ->
 
 @app.get("/api/ingest/progress")
 def ingest_progress() -> dict[str, Any]:
-    return read_ingest_state()
+    state = dict(retire_legacy_ingest())
+    state.pop("resumption_token", None)  # internal cursor, not needed by the site
+    return {**state, "daily": read_daily_update()}
 
 
 init_db()
