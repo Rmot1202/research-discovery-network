@@ -8,12 +8,14 @@ _os.environ.pop("DATABASE_URL_UNPOOLED", None)
 import json
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
+from sqlalchemy.exc import OperationalError
 from sqlalchemy import text
 
-from backend import affiliation_scan
+from backend import affiliation_scan, update_papers
 from backend.database import create_database_engine
 
 WORK = {
@@ -63,6 +65,30 @@ class AffiliationScanTests(unittest.TestCase):
         self.assertEqual(items[0]["country"], "United States")
         self.assertIn("Virginia State University", items[0]["evidence"])
         self.assertEqual(items[1]["type"], "company")
+
+    def test_save_affiliations_retries_after_database_connection_is_lost(self):
+        begin = self.engine.begin
+        disconnected = OperationalError(
+            "COMMIT", {}, RuntimeError("SSL connection has been closed unexpectedly"),
+            connection_invalidated=True,
+        )
+        def disconnected_once():
+            if not hasattr(disconnected_once, "raised"):
+                disconnected_once.raised = True
+                raise disconnected
+            return begin()
+
+        with mock.patch.object(self.engine, "begin", side_effect=disconnected_once) as begin_mock, \
+                mock.patch.object(affiliation_scan.time, "sleep") as sleep_mock:
+            saved = affiliation_scan.save_affiliations(
+                self.engine, "2601.00001", affiliation_scan.affiliations_from_openalex(WORK),
+                "openalex", WORK["id"],
+            )
+
+        self.assertTrue(saved)
+        self.assertEqual(begin_mock.call_count, 2)
+        sleep_mock.assert_called_once_with(1)
+        self.assertEqual(self.row("2601.00001")[0], "Virginia State University")
 
     def test_pdf_text_keeps_header_affiliations_and_ignores_emails_and_body(self):
         items = affiliation_scan.affiliations_from_text(PDF_TEXT)
@@ -137,6 +163,23 @@ class AffiliationScanTests(unittest.TestCase):
             "use_openalex": True,
         })
         thread.start.assert_called_once()
+
+    def test_daily_pdf_affiliation_scan_defaults_to_700_papers(self):
+        today = datetime.now().date().isoformat()
+        with self.engine.begin() as connection:
+            connection.execute(
+                text("INSERT INTO papers (arxiv_id, analysis, title, institution, country, published_at) "
+                     "VALUES (:id, '{}', 'Paper', NULL, NULL, :published)"),
+                [{"id": f"2701.{index:05d}", "published": today} for index in range(701)],
+            )
+
+        with mock.patch.object(update_papers.app_main, "ENGINE", self.engine), \
+                mock.patch.dict("os.environ", {}, clear=True), \
+                mock.patch.object(affiliation_scan, "scan_pdfs_for", return_value={"pdf_checked": 700}) as scan:
+            result = update_papers.enrich_recent_pdf()
+
+        self.assertEqual(result["pdf_checked"], 700)
+        self.assertEqual(len(scan.call_args.args[1]), 700)
 
 
 class OldStyleIdTests(unittest.TestCase):

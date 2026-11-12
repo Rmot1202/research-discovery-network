@@ -15,9 +15,9 @@
 #     OPENALEX_DAILY_MAX (default 20000)   OPENALEX_MINUTES (default 20)
 #     ARXIV_BACKFILL_PAGES (default 10)    DB_STORAGE_LIMIT_MB (default 900, Neon Free is 1 GB)
 #     SUMMARY_MODEL (default qwen2.5:1.5b) SUMMARY_MINUTES (default 25)
-#     AFFILIATION_DAILY_LIMIT (default 300)
+#     AFFILIATION_DAILY_LIMIT (default 700; about 35 minutes of PDF fallback)
 # Minutes: private repos get 2,000 free Actions minutes a month; public repos are unlimited.
-# With the defaults this job runs about 60-75 minutes a day. Lower SUMMARY_MINUTES or
+# With the defaults this job can take about 80-100 minutes a day. Lower SUMMARY_MINUTES or
 # OPENALEX_MINUTES (or make the repo public) if you get close to the monthly limit.
 name: Update papers
 
@@ -38,7 +38,7 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -87,7 +87,7 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           OPENALEX_API_KEY: ${{ secrets.OPENALEX_API_KEY }}
           AFFILIATION_SOURCES: ${{ secrets.OPENALEX_API_KEY != '' && 'openalex+pdf' || 'pdf' }}
-          AFFILIATION_DAILY_LIMIT: ${{ vars.AFFILIATION_DAILY_LIMIT || '300' }}
+          AFFILIATION_DAILY_LIMIT: ${{ vars.AFFILIATION_DAILY_LIMIT || '700' }}
         run: python -m backend.update_papers --affiliations-only
 
       - name: Cache the free models

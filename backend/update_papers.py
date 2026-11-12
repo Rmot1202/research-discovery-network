@@ -121,7 +121,7 @@ def backfill_arxiv(state: dict[str, Any], max_pages: int) -> dict[str, Any]:
 
 def enrich_recent_pdf(days: int = 14, max_papers: int | None = None) -> dict[str, int]:
     """Read the PDFs of recent papers that have no affiliation yet (newest first, capped per run)."""
-    max_papers = max_papers if max_papers is not None else int(os.environ.get("AFFILIATION_DAILY_LIMIT", "300"))
+    max_papers = max_papers if max_papers is not None else int(os.environ.get("AFFILIATION_DAILY_LIMIT", "700"))
     since = (date.today() - timedelta(days=days)).isoformat()
     with app_main.ENGINE.connect() as connection:
         ids = [row[0] for row in connection.execute(

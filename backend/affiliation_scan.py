@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from sqlalchemy import bindparam, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.engine import Engine
 
 from backend.arxiv_utils import arxiv_path
@@ -52,6 +53,7 @@ from backend.arxiv_utils import arxiv_path
 OPENALEX_URL = "https://api.openalex.org/works"
 OPENALEX_BATCH = 50
 PDF_INTERVAL_SECONDS = 3.0
+DATABASE_RETRY_ATTEMPTS = 3
 USER_AGENT = "ResearchDiscoveryNetwork/0.4 (paper affiliation scan)"
 COUNTRY_NAMES: dict[str, str] = json.loads(
     (Path(__file__).parent / "data" / "country_codes.json").read_text(encoding="utf-8")
@@ -303,31 +305,38 @@ def save_affiliations(engine: Engine, arxiv_id: str, affiliations: list[dict[str
     if not affiliations:
         return False
     institution, country = _primary(affiliations)
-    with engine.begin() as connection:
-        row = connection.execute(
-            text("SELECT analysis, institution FROM papers WHERE arxiv_id = :id"), {"id": arxiv_id}
-        ).first()
-        if row is None or row[1]:
-            return False  # never overwrite a value that is already documented
-        analysis = json.loads(row[0] or "{}")
-        institutions = Counter(item["institution"] for item in affiliations)
-        analysis.update({
-            "affiliations": affiliations[:40],
-            "institutions_all": [name for name, _ in institutions.most_common(15)],
-            "countries_all": sorted({item["country"] for item in affiliations if item["country"]}),
-            "has_school_affiliation": any(item.get("type") == "education" for item in affiliations)
-            or any(re.search(r"universit|college|school|polytechn|hochschule", item["institution"], re.I) for item in affiliations),
-            "affiliation_source_url": source_url,
-            "affiliation_evidence": affiliations[0]["evidence"],
-            "affiliation_method": method,
-            "affiliation_reviewed": False,
-            "affiliation_scanned_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        })
-        connection.execute(
-            text("UPDATE papers SET institution = :i, country = :c, analysis = :a WHERE arxiv_id = :id AND institution IS NULL"),
-            {"i": institution, "c": country, "a": json.dumps(analysis, ensure_ascii=False), "id": arxiv_id},
-        )
-    return True
+    for attempt in range(DATABASE_RETRY_ATTEMPTS):
+        try:
+            with engine.begin() as connection:
+                row = connection.execute(
+                    text("SELECT analysis, institution FROM papers WHERE arxiv_id = :id"), {"id": arxiv_id}
+                ).first()
+                if row is None or row[1]:
+                    return False  # never overwrite a value that is already documented
+                analysis = json.loads(row[0] or "{}")
+                institutions = Counter(item["institution"] for item in affiliations)
+                analysis.update({
+                    "affiliations": affiliations[:40],
+                    "institutions_all": [name for name, _ in institutions.most_common(15)],
+                    "countries_all": sorted({item["country"] for item in affiliations if item["country"]}),
+                    "has_school_affiliation": any(item.get("type") == "education" for item in affiliations)
+                    or any(re.search(r"universit|college|school|polytechn|hochschule", item["institution"], re.I) for item in affiliations),
+                    "affiliation_source_url": source_url,
+                    "affiliation_evidence": affiliations[0]["evidence"],
+                    "affiliation_method": method,
+                    "affiliation_reviewed": False,
+                    "affiliation_scanned_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                })
+                connection.execute(
+                    text("UPDATE papers SET institution = :i, country = :c, analysis = :a WHERE arxiv_id = :id AND institution IS NULL"),
+                    {"i": institution, "c": country, "a": json.dumps(analysis, ensure_ascii=False), "id": arxiv_id},
+                )
+            return True
+        except OperationalError as error:
+            if not error.connection_invalidated or attempt == DATABASE_RETRY_ATTEMPTS - 1:
+                raise
+            time.sleep(2 ** attempt)
+    raise RuntimeError("Affiliation save retry loop exited unexpectedly.")
 
 
 # ----------------------------------------------------------------------------- scan loop

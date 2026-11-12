@@ -378,8 +378,9 @@ papers at `DB_STORAGE_LIMIT_MB` (default 900) so the database never fills up.
 - **How to change code:** work on a branch, open a pull request, wait for CI, then merge.
   Merging to `main` is what deploys the site.
 - **Actions minutes:** the repo is public, so GitHub Actions minutes are free and unlimited. If it
-  ever goes private again, the daily job (60-75 minutes) uses most of the 2,000 free minutes a
-  month; lower `SUMMARY_MINUTES` and `OPENALEX_MINUTES` in the repo's Actions variables.
+  ever goes private again, the daily job (about 80-100 minutes with the 700-paper PDF scan) uses
+  most of the 2,000 free minutes a month; lower `SUMMARY_MINUTES` and `OPENALEX_MINUTES` in the
+  repo's Actions variables.
 - **No more local loading:** the workflow writes straight into Neon. `migrate_to_postgres`
   is only needed once if you want to copy an old local SQLite file.
 - **Catch up after a gap:** Actions → Update papers → Run workflow, and enter a start date.
@@ -401,6 +402,10 @@ Each run does two lanes per source:
   importer reads the remaining budget from the response headers and keeps `OPENALEX_RESERVE_CREDITS`
   (1,000 calls) for the affiliation step. The real limits are `OPENALEX_DAILY_MAX` (20,000 new
   papers), `OPENALEX_MINUTES` (20) and the database size.
+- **Affiliations:** the daily workflow checks OpenAlex first for up to 5,000 recent arXiv papers,
+  then checks up to `AFFILIATION_DAILY_LIMIT` PDFs (default 700, about 35 minutes at one every
+  three seconds). The workflow allows up to 120 minutes so affiliation lookups have room to finish
+  before embeddings and summaries run.
 - OpenAlex IDs (`W...`) are stored in the same `arxiv_id` column, link to `openalex.org/works/W...`,
   and the assistant cites them as `[OpenAlex:W...]`.
 - Test locally: `python -m backend.openalex_import --dry-run --max-new 50`.
