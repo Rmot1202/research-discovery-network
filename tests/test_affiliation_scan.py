@@ -121,6 +121,23 @@ class AffiliationScanTests(unittest.TestCase):
         self.assertEqual(state["status"], "complete")
         self.assertEqual(state["found"], 1)
 
+    def test_dashboard_scan_always_uses_openalex_and_honors_pdf_fallback(self):
+        thread = mock.Mock()
+        thread.is_alive.return_value = True
+        with mock.patch.object(affiliation_scan, "_thread", None), \
+                mock.patch.object(affiliation_scan.threading, "Thread", return_value=thread) as thread_factory:
+            affiliation_scan.start_background(self.engine, pdf_fallback=True, limit=20)
+
+        thread_factory.assert_called_once()
+        self.assertEqual(thread_factory.call_args.kwargs["kwargs"], {
+            "engine": self.engine,
+            "limit": 20,
+            "pdf_fallback": True,
+            "stop": affiliation_scan._stop,
+            "use_openalex": True,
+        })
+        thread.start.assert_called_once()
+
 
 class OldStyleIdTests(unittest.TestCase):
     def test_pre_2007_ids_get_their_archive_back(self):

@@ -4,7 +4,7 @@ paper in the archive, from documented sources only.
 arXiv's own metadata almost never includes affiliations, so the scan walks the whole
 archive in arXiv-ID order and looks each paper up in two places:
 
-1. OpenAlex (default, fast). arXiv papers have DataCite DOIs (10.48550/arXiv.<id>);
+1. OpenAlex (fast). arXiv papers have DataCite DOIs (10.48550/arXiv.<id>);
    OpenAlex links each author to the institutions printed on the paper, with ROR IDs,
    country codes, and institution type (education, company, government, ...). 50 papers
    are looked up per request.
@@ -17,7 +17,8 @@ its source URL, the verbatim affiliation text, and the method that found it, and
 marked as not yet reviewed. Existing institution/country values (for example, ones an
 admin entered) are never overwritten.
 
-Which sources are used is set by AFFILIATION_SOURCES (or --sources):
+The admin dashboard always checks OpenAlex first; its PDF checkbox enables PDF fallback.
+For CLI and daily scans, AFFILIATION_SOURCES (or --sources) controls sources:
   "pdf" (default): only the paper's own PDF. Free, no account or key, about 1 paper / 3 s.
   "openalex+pdf": OpenAlex first, PDF for misses.   "openalex": OpenAlex only.
 
@@ -70,7 +71,7 @@ COUNTRY_ALIASES = {"USA": "United States", "U.S.A.": "United States", "UK": "Uni
                    "PR China": "China", "Korea": "South Korea", "Republic of Korea": "South Korea"}
 
 def configured_sources() -> tuple[bool, bool]:
-    """(use_openalex, use_pdf) from AFFILIATION_SOURCES; default is PDF only, no OpenAlex."""
+    """CLI and daily-import sources from AFFILIATION_SOURCES; defaults to PDF only."""
     value = os.environ.get("AFFILIATION_SOURCES", "pdf").strip().lower()
     use_openalex = "openalex" in value
     use_pdf = "pdf" in value or not use_openalex
@@ -532,7 +533,17 @@ def start_background(engine: Engine, pdf_fallback: bool = False, limit: int | No
         if _thread and _thread.is_alive():
             return progress(engine)
         _stop.clear()
-        _thread = threading.Thread(target=run_scan, args=(engine, limit, pdf_fallback, None, _stop), daemon=True)
+        _thread = threading.Thread(
+            target=run_scan,
+            kwargs={
+                "engine": engine,
+                "limit": limit,
+                "pdf_fallback": pdf_fallback,
+                "stop": _stop,
+                "use_openalex": True,
+            },
+            daemon=True,
+        )
         _thread.start()
     time.sleep(0.2)
     return progress(engine)

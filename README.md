@@ -228,12 +228,16 @@ Rules: values are never guessed from author names or email domains; emails and U
 Run it from the admin dashboard (**Paper scan** panel), or from the command line in the project folder:
 
 ```bash
-.venv/bin/python -m backend.affiliation_scan --limit 2000      # OpenAlex only, first 2,000 unscanned papers
+.venv/bin/python -m backend.affiliation_scan --sources openalex --limit 2000 # OpenAlex only
+.venv/bin/python -m backend.affiliation_scan --sources openalex+pdf --limit 2000 # OpenAlex, then PDF fallback
+.venv/bin/python -m backend.affiliation_scan --limit 2000      # PDF only (default for CLI)
 .venv/bin/python -m backend.affiliation_scan                   # whole archive (resumable; Ctrl+C pauses)
-.venv/bin/python -m backend.affiliation_scan --pdf --limit 300 # also read PDFs for papers OpenAlex misses
+.venv/bin/python -m backend.affiliation_scan --sources openalex+pdf --limit 300 # also read PDFs for OpenAlex misses
 .venv/bin/python -m backend.affiliation_scan --status          # progress
 .venv/bin/python -m backend.affiliation_scan --restart         # start a new pass from the first paper
 ```
+
+The admin dashboard always checks OpenAlex first; its **Also read PDFs** option enables the slower PDF fallback.
 
 Prefix with `env -u DATABASE_URL` to scan the local SQLite file instead of PostgreSQL. Without `OPENALEX_API_KEY`, OpenAlex gives each network a small shared daily budget (about 1,000 requests ≈ 50,000 papers); when it runs out the scan pauses with a message and resumes from its saved cursor. Add a free key to `.env` for a larger budget.
 
