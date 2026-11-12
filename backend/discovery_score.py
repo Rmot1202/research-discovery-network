@@ -225,15 +225,15 @@ def _index_rows(engine: Engine) -> list[tuple[Any, ...]]:
         "FROM papers p LEFT JOIN paper_subtopics s "
         "ON s.arxiv_id = p.arxiv_id AND s.category = p.primary_category"
     )
-    try:
-        with engine.connect() as connection:
-            result = connection.execution_options(stream_results=True, yield_per=5000).execute(joined)
-            return [tuple(row) for row in result]
-    except Exception:  # the clustering tables do not exist yet
-        with engine.connect() as connection:
-            result = connection.execution_options(stream_results=True, yield_per=5000).execute(
-                text("SELECT arxiv_id, primary_category, institution, country FROM papers"))
-            return [(*row, None) for row in result]
+    plain = text("SELECT arxiv_id, primary_category, institution, country FROM papers")
+    for options in ({"stream_results": True, "yield_per": 5000}, {}):  # plain read if streaming is refused
+        try:
+            with engine.connect() as connection:
+                return [tuple(row) for row in connection.execution_options(**options).execute(joined)]
+        except Exception:
+            pass
+    with engine.connect() as connection:  # the clustering tables do not exist yet
+        return [(*row, None) for row in connection.execute(plain)]
 
 
 def load_index(engine: Engine, *, fresh: bool = False) -> DiscoveryIndex:

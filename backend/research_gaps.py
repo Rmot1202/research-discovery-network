@@ -122,10 +122,13 @@ def _load_corpus(engine: Engine) -> dict[str, Any]:
         cached = _cached_corpus(count)
         if cached is not None:
             return cached
-        return _build_corpus(engine, count)
+        try:
+            return _build_corpus(engine, count)
+        except Exception:  # a pooler that refuses server-side cursors: read normally instead
+            return _build_corpus(engine, count, stream=False)
 
 
-def _build_corpus(engine: Engine, count: int) -> dict[str, Any]:
+def _build_corpus(engine: Engine, count: int, stream: bool = True) -> dict[str, Any]:
     categories: dict[str, list[str]] = {}
     papers: dict[str, dict[str, Any]] = {}
     with engine.connect() as connection:
@@ -133,7 +136,8 @@ def _build_corpus(engine: Engine, count: int) -> dict[str, Any]:
             if category in CATEGORY_CODES:
                 categories.setdefault(arxiv_id, []).append(category)
         ingest = connection.execute(text("SELECT state_json FROM ingest_state WHERE id = 1")).first()
-        result = connection.execution_options(stream_results=True, yield_per=CORPUS_BATCH).execute(text(CORPUS_QUERY))
+        options = {"stream_results": True, "yield_per": CORPUS_BATCH} if stream else {}
+        result = connection.execution_options(**options).execute(text(CORPUS_QUERY))
         for arxiv_id, published_at, title, authors, institution, country, analysis_json in result:
             papers[arxiv_id] = _paper_entry(published_at, title, authors, institution, country, analysis_json,
                                             categories.get(arxiv_id, []))
