@@ -16,7 +16,7 @@ document lists where secrets live, never their values.
 | Old database | Render Postgres (free) | Not used any more. Delete it after a few days of the site running on Neon. A backup dump is in `~/rdn-backups/` on Raven's Mac |
 | Daily imports | GitHub Actions `Update papers`, 06:30 UTC | Writes straight to Neon. Repo is public, so Actions minutes are free |
 | CI | GitHub Actions `CI` | Type-check + build, Python tests, Docker image check; required for Render to deploy |
-| Admin sign-in | `ADMIN_API_TOKEN` (Render env) | Firebase Google sign-in is wired in code but not configured yet (optional) |
+| Admin sign-in | Firebase Google sign-in (emails in `ADMIN_EMAILS`) or `ADMIN_API_TOKEN` | Firebase variables set on Render 2026-11-11 |
 | Agent tooling | `.agents/skills` (Neon skills, pinned in `skills-lock.json`), `.mcp.json`, `.codex/config.toml`, `.vscode/mcp.json` | Neon MCP server `https://mcp.neon.tech/mcp`, OAuth sign-in on first use, no keys in the repo |
 
 ### Where each setting lives
@@ -26,7 +26,7 @@ document lists where secrets live, never their values.
 | `DATABASE_URL` (Neon **pooled**, `-pooler` host) | yes | secret | `.env.local` |
 | `DATABASE_URL_UNPOOLED` (Neon **direct**) | no | no | `.env.local` (migrations, `pg_dump`/`pg_restore`) |
 | `ADMIN_API_TOKEN` | yes | no | optional in `.env` |
-| `OPENALEX_API_KEY` | no | secret (optional, larger OpenAlex budget) | optional in `.env` |
+| `OPENALEX_API_KEY` | optional (only for the admin "scan affiliations" button) | secret: turns on the daily OpenAlex import and OpenAlex affiliations | optional in `.env` |
 | `FIREBASE_PROJECT_ID`, `FIREBASE_WEB_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `ADMIN_EMAILS` | when Firebase is set up | no | no |
 | `PUBLISH_MODE` | `auto` | no | `.env` |
 
@@ -136,13 +136,18 @@ clipboard with `pbcopy < /dev/null`.
   GitHub secret `DATABASE_URL` set to Neon's pooled string (secret added 16:25 ET). Repo made public.
 - **Cleanup:** merged branches deleted; `.dockerignore` excludes agent tooling and docs; this guide
   added.
+- **Old full import retired:** the admin dashboard's one-time "Ingest all arXiv CS papers" import
+  stopped on 2026-11-04 (arXiv timed out after 53 pages). Once the daily job has run, a stopped
+  full import is marked `retired` and the homepage shows the daily job's last run instead of the old
+  error. arXiv requests now wait 90 s and retry up to 3 times.
+- **Firebase** Google sign-in configured on Render.
 
 ## Still to do
 
 - [ ] Confirm Render's `DATABASE_URL` is the Neon pooled string: after today's import, Admin →
       "Papers loaded today" should show new papers (an old Render database would show none).
 - [ ] Delete the old Render Postgres database after a few days on Neon (backup in `~/rdn-backups/`).
-- [ ] Optional: set up Firebase Google sign-in (README → Deploy online → step 2) and add the four
-      Firebase variables to Render.
-- [ ] Optional: add `OPENALEX_API_KEY` as a GitHub secret for a larger daily OpenAlex budget.
+- [ ] Firebase: check that Google sign-in works on the live site (Firebase → Authentication →
+      Settings → Authorized domains must list `research-discovery-network.onrender.com`).
+- [ ] Optional: add `OPENALEX_API_KEY` as a GitHub secret to turn on the daily OpenAlex import.
 - [ ] Optional: rename the Neon project from "my-first-project" (Neon → Settings).
