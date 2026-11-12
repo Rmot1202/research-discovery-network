@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -9,6 +10,29 @@ from fastapi import HTTPException
 from backend.arxiv_utils import abs_url, is_openalex_id, pdf_url
 from backend.discovery_score import DiscoveryIndex, ranked_ids, score_paper
 from backend.taxonomy import CATEGORIES, CATEGORY_CODES, CATEGORY_LABELS
+
+
+_SEARCH_ALIASES = {"hmi": ("human", "machine", "interaction")}
+
+
+def _search_patterns(query: str) -> list[str]:
+    words = re.findall(r"[^\W_]+", query.casefold(), flags=re.UNICODE)
+    if not words:
+        return [f"%{query.strip()}%"]
+
+    variants = [tuple(words)]
+    for alias, expansion in _SEARCH_ALIASES.items():
+        if alias in words:
+            variants.append(tuple(
+                expanded_word
+                for word in words
+                for expanded_word in (_SEARCH_ALIASES.get(word, (word,)))
+            ))
+        for start in range(len(words) - len(expansion) + 1):
+            if tuple(words[start:start + len(expansion)]) == expansion:
+                variants.append(tuple(words[:start]) + (alias,) + tuple(words[start + len(expansion):]))
+
+    return [f"%{'%'.join(variant)}%" for variant in dict.fromkeys(variants)]
 
 
 def read_paper_rows(
@@ -51,8 +75,8 @@ def read_paper_rows(
     elif approval_status:
         clauses.append("approval_status = ?")
         values.append(approval_status)
-    if query:
-        search = f"%{query.strip()}%"
+    if query.strip():
+        search_patterns = _search_patterns(query)
         matched_categories = [
             code
             for code, label in CATEGORIES
@@ -66,12 +90,16 @@ def read_paper_rows(
             if matched_categories
             else ""
         )
-        clauses.append(
-            "(LOWER(title) LIKE LOWER(?) OR LOWER(abstract) LIKE LOWER(?) OR LOWER(authors) LIKE LOWER(?) "
+        search_fields = (
+            "LOWER(title) LIKE LOWER(?) OR LOWER(abstract) LIKE LOWER(?) OR LOWER(authors) LIKE LOWER(?) "
             "OR LOWER(COALESCE(institution, '')) LIKE LOWER(?) "
-            f"OR LOWER(COALESCE(country, '')) LIKE LOWER(?) OR LOWER(primary_category) LIKE LOWER(?){category_search})"
+            "OR LOWER(COALESCE(country, '')) LIKE LOWER(?) OR LOWER(primary_category) LIKE LOWER(?)"
         )
-        values.extend([search] * 6)
+        clauses.append(
+            "(" + " OR ".join(f"({search_fields})" for _ in search_patterns) + f"{category_search})"
+        )
+        for pattern in search_patterns:
+            values.extend([pattern] * 6)
         values.extend(matched_categories)
     where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
     ordering = {
@@ -178,5 +206,3 @@ def get_filter_options(connect_db: Callable[[], Any]) -> dict[str, Any]:
             )
         }
     return {"institutions": institutions, "countries": countries, "years": years, "counts": counts}
-
-

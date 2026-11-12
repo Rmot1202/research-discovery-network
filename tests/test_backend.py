@@ -342,6 +342,44 @@ class ReviewWorkflowTests(unittest.TestCase):
             main.update_paper_review("2601.00002", ReviewUpdate(approval_status="rejected"), "Bearer test-token")
             self.assertEqual(main.list_featured_papers(**arguments)["total"], 1)
 
+    def test_title_search_treats_hmi_and_human_machine_interaction_as_equivalent(self):
+        titles = [
+            "HMI systems in robotics",
+            "Human machine interaction in robotics",
+            "Human-machine interaction in robotics",
+        ]
+        main.insert_papers([
+            {
+                "arxiv_id": f"2601.0000{index}",
+                "url": f"https://arxiv.org/abs/2601.0000{index}",
+                "title": title,
+                "abstract": "A study in robotics.",
+                "authors": ["Example Author"],
+                "published_at": "2026-01-03T00:00:00Z",
+                "categories": ["cs.HC"],
+                "primary_category": "cs.HC",
+            }
+            for index, title in enumerate(titles, start=3)
+        ])
+
+        def result_ids(query):
+            result = main.list_papers(
+                limit=10,
+                offset=0,
+                q=query,
+                category=None,
+                country=None,
+                institution=None,
+                year=None,
+                sort="newest",
+            )
+            return {paper["arxiv_id"] for paper in result["papers"]}
+
+        expected = {"2601.00003", "2601.00004", "2601.00005"}
+        self.assertEqual(result_ids("HMI"), expected)
+        self.assertEqual(result_ids("human machine interaction"), expected)
+        self.assertEqual(result_ids("human-machine interaction"), expected)
+
     def test_daily_update_imports_new_papers_and_remembers_the_run_date(self):
         from backend import update_papers
 
