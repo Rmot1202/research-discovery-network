@@ -47,6 +47,7 @@ import time
 from collections import Counter, defaultdict
 from typing import Any
 
+from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from backend.database import database_connection
@@ -217,26 +218,32 @@ def invalidate() -> None:
         _cache.clear()
 
 
+def _index_rows(engine: Engine) -> list[tuple[Any, ...]]:
+    """(arxiv_id, field, institution, country, cluster_id) for every paper, streamed in batches."""
+    joined = text(
+        "SELECT p.arxiv_id, p.primary_category, p.institution, p.country, s.cluster_id "
+        "FROM papers p LEFT JOIN paper_subtopics s "
+        "ON s.arxiv_id = p.arxiv_id AND s.category = p.primary_category"
+    )
+    plain = text("SELECT arxiv_id, primary_category, institution, country FROM papers")
+    for options in ({"stream_results": True, "yield_per": 5000}, {}):  # plain read if streaming is refused
+        try:
+            with engine.connect() as connection:
+                return [tuple(row) for row in connection.execution_options(**options).execute(joined)]
+        except Exception:
+            pass
+    with engine.connect() as connection:  # the clustering tables do not exist yet
+        return [(*row, None) for row in connection.execute(plain)]
+
+
 def load_index(engine: Engine, *, fresh: bool = False) -> DiscoveryIndex:
     key = id(engine)
     with _cache_lock:
         cached = _cache.get(key)
         if cached and not fresh and time.monotonic() - cached[0] < CACHE_SECONDS:
             return cached[1]
+    rows = _index_rows(engine)
     with database_connection(engine) as connection:
-        try:
-            rows = connection.execute(
-                "SELECT p.arxiv_id, p.primary_category, p.institution, p.country, s.cluster_id "
-                "FROM papers p LEFT JOIN paper_subtopics s "
-                "ON s.arxiv_id = p.arxiv_id AND s.category = p.primary_category"
-            ).fetchall()
-        except Exception:  # the clustering tables do not exist yet
-            rows = [
-                (*row, None)
-                for row in connection.execute(
-                    "SELECT arxiv_id, primary_category, institution, country FROM papers"
-                ).fetchall()
-            ]
         try:
             labels = {
                 (row[0], str(row[1])): row[2]
@@ -244,7 +251,7 @@ def load_index(engine: Engine, *, fresh: bool = False) -> DiscoveryIndex:
             }
         except Exception:
             labels = {}
-    index = DiscoveryIndex([tuple(row[i] for i in range(5)) for row in rows])
+    index = DiscoveryIndex(rows)
     index.subtopic_labels = labels
     with _cache_lock:
         _cache[key] = (time.monotonic(), index)
