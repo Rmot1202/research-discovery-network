@@ -105,6 +105,10 @@ clipboard with `pbcopy < /dev/null`.
 
 ## Troubleshooting
 
+- **"Unexpected end of JSON input" or "Unexpected token '<'" on the site:** the Render instance ran
+  out of memory and restarted. Render → web service → Events shows "Out of memory". Wait a minute;
+  if it keeps happening as the archive grows, upgrade the instance or lower the work done per request.
+
 | Symptom | Cause | Fix |
 |---|---|---|
 | Tests or the API try `127.0.0.1:5432` and get "Connection refused" | A `DATABASE_URL` in the shell points at local Docker PostgreSQL. VS Code's `"python.terminal.useEnvFile": true` (in `.vscode/settings.json`) loads `.env` into every new terminal | Remove `DATABASE_URL` from `.env` (Neon's is in `.env.local`), or `unset DATABASE_URL`. Tests ignore it either way |
@@ -141,6 +145,11 @@ clipboard with `pbcopy < /dev/null`.
   full import is marked `retired` and the homepage shows the daily job's last run instead of the old
   error. arXiv requests now wait 90 s and retry up to 3 times.
 - **Firebase** Google sign-in configured on Render.
+- **Memory on Render free (512 MB):** at 86k papers, building the research-gap ranking could
+  restart the server ("Unexpected end of JSON input" / "Unexpected token '<'" on the site). The gap
+  corpus and discovery index now stream rows in batches, skip unneeded JSON, and build one at a
+  time; `MALLOC_ARENA_MAX=2` is set in the Dockerfile; the site retries a GET once and shows "server
+  is busy or restarting" instead of a JSON error.
 
 ## Still to do
 

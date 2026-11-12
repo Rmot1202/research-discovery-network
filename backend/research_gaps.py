@@ -75,6 +75,7 @@ CACHE_SECONDS = 600
 MIN_DOCUMENTED = 10
 
 _cache_lock = threading.Lock()
+_build_lock = threading.Lock()
 _cache: dict[str, Any] = {"built": 0.0, "count": -1, "corpus": None}
 
 
@@ -93,46 +94,81 @@ def invalidate_cache() -> None:
     discovery_score.invalidate()
 
 
+def _cached_corpus(count: int) -> dict[str, Any] | None:
+    if _cache["corpus"] is not None and _cache["count"] == count and time.monotonic() - _cache["built"] < CACHE_SECONDS:
+        return _cache["corpus"]
+    return None
+
+
+# Only the analysis JSON of papers with scanned affiliations is needed; the rest (summaries, older
+# inline embeddings) stays in the database. Rows are streamed in batches, so peak memory stays low
+# on small hosts (Render free: 512 MB).
+CORPUS_QUERY = (
+    "SELECT arxiv_id, published_at, title, authors, institution, country, "
+    "CASE WHEN analysis LIKE '%institutions_all%' THEN analysis ELSE NULL END AS analysis FROM papers"
+)
+CORPUS_BATCH = 2000
+
+
 def _load_corpus(engine: Engine) -> dict[str, Any]:
     with engine.connect() as connection:
         count = connection.execute(text("SELECT COUNT(*) FROM papers")).scalar_one()
-        now = time.monotonic()
-        if _cache["corpus"] is not None and _cache["count"] == count and now - _cache["built"] < CACHE_SECONDS:
-            return _cache["corpus"]
-        rows = connection.execute(text("SELECT arxiv_id, published_at, title, authors, institution, country, analysis FROM papers")).all()
-        memberships = connection.execute(text("SELECT arxiv_id, category FROM paper_categories")).all()
-        ingest = connection.execute(text("SELECT state_json FROM ingest_state WHERE id = 1")).first()
+    cached = _cached_corpus(count)
+    if cached is not None:
+        return cached
+    with _build_lock:  # one build at a time; requests that waited reuse the fresh result
+        with engine.connect() as connection:
+            count = connection.execute(text("SELECT COUNT(*) FROM papers")).scalar_one()
+        cached = _cached_corpus(count)
+        if cached is not None:
+            return cached
+        return _build_corpus(engine, count)
 
+
+def _build_corpus(engine: Engine, count: int) -> dict[str, Any]:
     categories: dict[str, list[str]] = {}
-    for arxiv_id, category in memberships:
-        if category in CATEGORY_CODES:
-            categories.setdefault(arxiv_id, []).append(category)
     papers: dict[str, dict[str, Any]] = {}
-    for arxiv_id, published_at, title, authors, institution, country, analysis_json in rows:
-        institutions_all: list[str] = []
-        countries_all: list[str] = []
-        if analysis_json and "institutions_all" in analysis_json:
-            try:
-                analysis = json.loads(analysis_json)
-                institutions_all = [" ".join(str(v).split()) for v in analysis.get("institutions_all") or [] if v]
-                countries_all = [" ".join(str(v).split()) for v in analysis.get("countries_all") or [] if v]
-            except (json.JSONDecodeError, TypeError):
-                pass
+    with engine.connect() as connection:
+        for arxiv_id, category in connection.execute(text("SELECT arxiv_id, category FROM paper_categories")):
+            if category in CATEGORY_CODES:
+                categories.setdefault(arxiv_id, []).append(category)
+        ingest = connection.execute(text("SELECT state_json FROM ingest_state WHERE id = 1")).first()
+        result = connection.execution_options(stream_results=True, yield_per=CORPUS_BATCH).execute(text(CORPUS_QUERY))
+        for arxiv_id, published_at, title, authors, institution, country, analysis_json in result:
+            papers[arxiv_id] = _paper_entry(published_at, title, authors, institution, country, analysis_json,
+                                            categories.get(arxiv_id, []))
+    return _finish_corpus(papers, ingest, count)
+
+
+def _paper_entry(published_at: Any, title: Any, authors: Any, institution: Any, country: Any,
+                 analysis_json: Any, paper_categories: list[str]) -> dict[str, Any]:
+    institutions_all: list[str] = []
+    countries_all: list[str] = []
+    if analysis_json and "institutions_all" in analysis_json:
         try:
-            author_list = json.loads(authors) if authors else []
+            analysis = json.loads(analysis_json)
+            institutions_all = [" ".join(str(v).split()) for v in analysis.get("institutions_all") or [] if v]
+            countries_all = [" ".join(str(v).split()) for v in analysis.get("countries_all") or [] if v]
         except (json.JSONDecodeError, TypeError):
-            author_list = []
-        papers[arxiv_id] = {
-            "date": (published_at or "")[:10],
-            "survey": bool(SURVEY_PATTERN.search(title or "")),
-            "authors": [" ".join(str(name).lower().split()) for name in author_list if name][:30],
-            "categories": categories.get(arxiv_id, []),
-            "institution": " ".join(institution.split()) if institution else None,
-            "country": " ".join(country.split()) if country else None,
-            # Every documented institution / country on the paper (from the paper scan), else the primary one.
-            "institutions": institutions_all or ([" ".join(institution.split())] if institution else []),
-            "countries": countries_all or ([" ".join(country.split())] if country else []),
-        }
+            pass
+    try:
+        author_list = json.loads(authors) if authors else []
+    except (json.JSONDecodeError, TypeError):
+        author_list = []
+    return {
+        "date": (published_at or "")[:10],
+        "survey": bool(SURVEY_PATTERN.search(title or "")),
+        "authors": [" ".join(str(name).lower().split()) for name in author_list if name][:30],
+        "categories": paper_categories,
+        "institution": " ".join(institution.split()) if institution else None,
+        "country": " ".join(country.split()) if country else None,
+        # Every documented institution / country on the paper (from the paper scan), else the primary one.
+        "institutions": institutions_all or ([" ".join(institution.split())] if institution else []),
+        "countries": countries_all or ([" ".join(country.split())] if country else []),
+    }
+
+
+def _finish_corpus(papers: dict[str, dict[str, Any]], ingest: Any, count: int) -> dict[str, Any]:
     dates = [paper["date"] for paper in papers.values() if re.fullmatch(r"\d{4}-\d{2}-\d{2}", paper["date"])]
     latest = date.fromisoformat(max(dates)) if dates else date.today()
     survey_total = sum(1 for paper in papers.values() if paper["survey"])
