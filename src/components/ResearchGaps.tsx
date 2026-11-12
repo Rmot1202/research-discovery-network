@@ -159,7 +159,7 @@ export default function ResearchGaps({ report, error, topics, onSelectTopic }: R
       {idea && methodology && (
         <div className="gap-result" aria-live="polite">
           <p className="gap-query">
-            Papers matching <b>all</b> of: {idea.keywords.map((keyword) => <code key={keyword}>{keyword}</code>)}
+            Search terms (including common aliases): {idea.keywords.map((keyword) => <code key={keyword}>{keyword}</code>)}
             {idea.topic_percentile !== null && idea.metrics.papers > 0 && <> · more under-researched than {idea.topic_percentile}% of CS topics</>}
           </p>
           <div className="gap-cards">

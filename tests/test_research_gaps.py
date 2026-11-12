@@ -94,6 +94,26 @@ class ResearchGapTests(unittest.TestCase):
         missing = research_gaps.idea_gap_report(self.engine, "quantum blockchain")
         self.assertEqual(missing["verdict"], "No papers found")
 
+    def test_idea_search_normalizes_hmi_and_hyphenated_phrases(self):
+        with database_connection(self.engine) as connection:
+            add_paper(
+                connection, "2601.00001", ["cs.HC"], "HMI-based control systems",
+                "A study of control systems.", "2026-01-01", ["Author One"],
+            )
+            add_paper(
+                connection, "2601.00002", ["cs.HC"], "Human-Machine Interfaces for Control",
+                "A study of interface systems.", "2026-01-02", ["Author Two"],
+            )
+            add_paper(
+                connection, "2601.00003", ["cs.HC"], "Human machine interaction in control",
+                "A study of interaction systems.", "2026-01-03", ["Author Three"],
+            )
+
+        expected = {"2601.00001", "2601.00002", "2601.00003"}
+        for query in ("HMI", "Human-Machine Interface", "Human Machine Interface", "Human Machine Interaction"):
+            with self.subTest(query=query):
+                self.assertEqual(set(research_gaps._matching_ids(self.engine, query, None)), expected)
+
 
 if __name__ == "__main__":
     unittest.main()

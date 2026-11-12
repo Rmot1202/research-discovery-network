@@ -53,6 +53,11 @@ from backend.arxiv_utils import abs_url
 from backend.paper_chat import ensure_search_index, extract_keywords
 from backend.taxonomy import CATEGORIES, CATEGORY_CODES, CATEGORY_LABELS
 
+HMI_EXPANSIONS = (
+    ("human", "machine", "interface"),
+    ("human", "machine", "interaction"),
+)
+
 WEIGHTS = {
     "scarcity": 0.30,
     "momentum_gap": 0.20,
@@ -337,8 +342,29 @@ def topic_gap_report(engine: Engine) -> dict[str, Any]:
     return {"methodology": _methodology(corpus), "topics": topics}
 
 
+def _idea_keyword_variants(query: str) -> list[list[str]]:
+    keywords = extract_keywords(query.replace("-", " "))
+    variants = [keywords]
+    if "hmi" in keywords:
+        for expansion in HMI_EXPANSIONS:
+            variants.append([
+                expanded
+                for keyword in keywords
+                for expanded in (expansion if keyword == "hmi" else (keyword,))
+            ])
+    for start in range(len(keywords) - 2):
+        phrase = keywords[start:start + 3]
+        if phrase[:2] == ["human", "machine"] and phrase[2] in {"interface", "interfaces", "interaction", "interactions"}:
+            context_before, context_after = keywords[:start], keywords[start + 3:]
+            variants.append(context_before + ["hmi"] + context_after)
+            for expansion in HMI_EXPANSIONS:
+                variants.append(context_before + list(expansion) + context_after)
+    return [list(variant) for variant in dict.fromkeys(tuple(variant) for variant in variants)]
+
+
 def _matching_ids(engine: Engine, query: str, category: str | None, limit: int = 20000) -> list[str]:
-    keywords = extract_keywords(query)
+    variants = _idea_keyword_variants(query)
+    keywords = variants[0] if variants else []
     if not keywords:
         raise HTTPException(status_code=422, detail="Describe the research idea with a few specific keywords.")
     ensure_search_index(engine)
@@ -350,15 +376,21 @@ def _matching_ids(engine: Engine, query: str, category: str | None, limit: int =
         )
         params["category"] = category
     if engine.dialect.name == "sqlite":
-        # Every keyword must appear (AND), so the set describes this specific idea.
-        params["match"] = " AND ".join(f'"{keyword.replace(chr(34), "")}"' for keyword in keywords)
+        # Every keyword in a variant must appear; alternatives support equivalent spellings.
+        params["match"] = " OR ".join(
+            "(" + " AND ".join(f'"{keyword.replace(chr(34), "")}"' for keyword in variant) + ")"
+            for variant in variants
+        )
         sql = (
             "SELECT p.arxiv_id FROM papers_fts JOIN papers p ON p.arxiv_id = papers_fts.arxiv_id "
             f"WHERE papers_fts MATCH :match{category_clause} LIMIT :limit"
         )
     elif engine.dialect.name == "postgresql":
-        terms = [re.sub(r"[^a-z0-9]", "", keyword) for keyword in keywords]
-        params["tsquery"] = " & ".join(term for term in terms if term)
+        params["tsquery"] = " | ".join(
+            "(" + " & ".join(term for keyword in variant
+                             if (term := re.sub(r"[^a-z0-9]", "", keyword))) + ")"
+            for variant in variants
+        )
         if not params["tsquery"]:
             return []
         document = "to_tsvector('english', coalesce(p.title, '') || ' ' || coalesce(p.abstract, ''))"
@@ -367,11 +399,16 @@ def _matching_ids(engine: Engine, query: str, category: str | None, limit: int =
             f"{category_clause} LIMIT :limit"
         )
     else:
-        clauses = []
-        for index, keyword in enumerate(keywords):
-            params[f"k{index}"] = f"%{keyword}%"
-            clauses.append(f"(LOWER(p.title) LIKE :k{index} OR LOWER(p.abstract) LIKE :k{index})")
-        sql = f"SELECT p.arxiv_id FROM papers p WHERE {' AND '.join(clauses)}{category_clause} LIMIT :limit"
+        variant_clauses = []
+        index = 0
+        for variant in variants:
+            clauses = []
+            for keyword in variant:
+                params[f"k{index}"] = f"%{keyword}%"
+                clauses.append(f"(LOWER(p.title) LIKE :k{index} OR LOWER(p.abstract) LIKE :k{index})")
+                index += 1
+            variant_clauses.append("(" + " AND ".join(clauses) + ")")
+        sql = f"SELECT p.arxiv_id FROM papers p WHERE {' OR '.join(variant_clauses)}{category_clause} LIMIT :limit"
     with engine.connect() as connection:
         return [row[0] for row in connection.execute(text(sql), params).all()]
 
@@ -405,7 +442,7 @@ def idea_gap_report(engine: Engine, query: str, category: str | None = None) -> 
     below = sum(1 for value in indices if value < result["index"])
     return {
         "query": query,
-        "keywords": extract_keywords(query),
+        "keywords": extract_keywords(query.replace("-", " ")),
         "category": category,
         **result,
         "topic_percentile": round(100 * below / len(indices), 1) if indices else None,
