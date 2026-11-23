@@ -198,6 +198,35 @@ AI_EMBEDDING_MODEL=nomic-embed-text
 Or use a hosted OpenAI-compatible provider (see "Configure the AI provider").
 Restart the API after editing `.env`.
 
+### Connect Render to Ollama on your Mac
+
+Install ngrok and configure its authtoken in your local ngrok configuration.
+Run each of these commands in a separate terminal on the Mac:
+
+```sh
+OLLAMA_HOST=127.0.0.1:11434 ollama serve
+.venv/bin/python scripts/ollama_gateway.py
+ngrok http http://127.0.0.1:11435 --inspect=false
+```
+
+The gateway creates a private bearer token at
+`~/.config/rdn-ollama-gateway/bearer-token`. It forwards only the model list,
+chat completions, and embeddings. In the Render backend service's
+**Environment** page, enter the ngrok HTTPS URL with `/v1` appended as
+`AI_BASE_URL`, the contents of the token file as `AI_API_KEY`, and the Ollama
+model names above as `AI_CHAT_MODEL` and `AI_EMBEDDING_MODEL`. Select **Save and
+deploy**. Keep Ollama, the gateway, and ngrok running while Render uses them.
+Update `AI_BASE_URL` in Render if the tunnel address changes.
+
+Watch incoming API requests and their response status in a separate terminal:
+
+```sh
+tail -F ~/.config/rdn-ollama-gateway/requests.log
+```
+
+The log records the method, supported route, and status. It leaves out
+credentials and request contents.
+
 Endpoints: `GET /api/chat/status` and `POST /api/chat` with
 `{"question": "...", "history": [], "category": "cs.CV"}`.
 
